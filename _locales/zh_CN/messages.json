@@ -27,13 +27,13 @@
 		"message": "我是有底线的"
 	},
 	"optionsValue": {
-		"message": "查看配置"
+		"message": "配置"
 	},
 	"restoreKey": {
 		"message": "点击 “打开整组” 或点击 单个标签 时："
 	},
 	"restoreValueDelete": {
-		"message": "打开标签并将其从标签列表中删除（当标签组锁定时，不会删除）"
+		"message": "左键点击打开标签时，将其从标签列表中删除（中键打开不删除；标签组锁定时也不会删除）"
 	},
 	"restoreValueLive": {
 		"message": "打开标签但不将其从标签列表中删除"
@@ -399,7 +399,7 @@
 		"message": "出错了！"
 	},
 	"goToOptions": {
-		"message": "请去配置页面进行配置！"
+		"message": "请去 Gist 备份页面填写令牌！"
 	},
 	"githubToken": {
 		"message": "GitHub Token"
@@ -521,6 +521,123 @@
 	"backupImportSuccess": {
 		"message": "导入完成，页面将刷新。"
 	},
+	"settingsAlsoRestored": {
+		"message": "备份中的配置也已一并恢复。"
+	},
+	"gistAutoSkippedNoChange": {
+		"message": "自动备份跳过：数据无变化"
+	},
+	"gistRateLimited": {
+		"message": "被对方限流了："
+	},
+	"logPanelTitle": {
+		"message": "操作日志"
+	},
+	"logAutoClean": {
+		"message": "自动清理旧日志"
+	},
+	"logKeepDays": {
+		"message": "保留天数"
+	},
+	"logKeepCount": {
+		"message": "最多条数"
+	},
+	"logSuccess": {
+		"message": "成功"
+	},
+	"logFailed": {
+		"message": "失败"
+	},
+	"logEmpty": {
+		"message": "还没有记录。"
+	},
+	"logAction_gistPush": {
+		"message": "Gist 推送"
+	},
+	"logAction_gistPull": {
+		"message": "Gist 拉取"
+	},
+	"logAction_gistAutoBackup": {
+		"message": "Gist 自动备份"
+	},
+	"logAction_gistAutoBackupSkipped": {
+		"message": "Gist 自动备份跳过（无变化）"
+	},
+	"logAction_gistRateLimited": {
+		"message": "Gist 备份被限流"
+	},
+	"logAction_gistAutoBackupRateLimited": {
+		"message": "Gist 自动备份被限流"
+	},
+	"logAction_webdavUpload": {
+		"message": "WebDAV 上传备份"
+	},
+	"logAction_webdavRestore": {
+		"message": "WebDAV 恢复"
+	},
+	"logAction_webdavForceBackup": {
+		"message": "恢复前强制备份"
+	},
+	"logAction_webdavAutoBackup": {
+		"message": "WebDAV 自动备份"
+	},
+	"logAction_webdavCleanup": {
+		"message": "WebDAV 旧版本清理"
+	},
+	"logAction_exportBackup": {
+		"message": "导出备份文件"
+	},
+	"logAction_exportPage": {
+		"message": "导出网页文件"
+	},
+	"logAction_importBackup": {
+		"message": "导入备份"
+	},
+	"logAction_trashAutoClean": {
+		"message": "回收站自动清理"
+	},
+	"logAction_dataConvert": {
+		"message": "本地数据转换"
+	},
+	"navGistBackup": {
+		"message": "Gist 备份"
+	},
+	"navWebdav": {
+		"message": "WebDAV"
+	},
+	"importExport": {
+		"message": "导入/导出"
+	},
+	"gistAutoBackupTitle": {
+		"message": "Gist 自动备份"
+	},
+	"gistAutoBackupEnable": {
+		"message": "自动备份到 Gist"
+	},
+	"gistAutoInterval": {
+		"message": "自动备份频率（分钟）"
+	},
+	"gistAutoRateWarn": {
+		"message": "提醒：间隔太短可能被 GitHub/Gitee 限流，真被限流会记进日志。"
+	},
+	"gistAutoStatusLabel": {
+		"message": "自动备份状态"
+	},
+	"gistAutoStatusSuccess": {
+		"message": "上次自动备份成功"
+	},
+	"gistAutoStatusSkipped": {
+		"message": "上次自动备份跳过：数据无变化"
+	},
+	"gistAutoStatusFailed": {
+		"message": "上次自动备份失败"
+	},
+	"gistAutoStatusNone": {
+		"message": "还没有自动备份记录"
+	},
+	"usageOfRef": {
+		"message": "（以 10MB 为参考值）"
+	},
 	"htmlExportTitle": {
 		"message": "NJ-Tab 导出的标签"
 	},
@@ -562,6 +679,27 @@
 	},
 	"webdavUploadSuccess": {
 		"message": "上传成功，备份已经存到 WebDAV 了。"
+	},
+	"webdavTest": {
+		"message": "连接测试"
+	},
+	"webdavTestSuccess": {
+		"message": "连接成功，地址、账号、密码都对。"
+	},
+	"webdavTestFailed": {
+		"message": "连接失败："
+	},
+	"webdavVersionDelete": {
+		"message": "删除"
+	},
+	"webdavVersionDeleteConfirm": {
+		"message": "确定要删除服务器上的这个备份版本吗？删了就找不回来了："
+	},
+	"webdavVersionDeleteFailed": {
+		"message": "删除版本失败："
+	},
+	"webdavNoVersions": {
+		"message": "服务器上还没有备份版本。"
 	},
 	"webdavUploadFailed": {
 		"message": "上传失败，本地数据没有变化。请检查服务器地址、账号密码和网络后再试。详情："

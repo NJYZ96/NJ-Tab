@@ -75,21 +75,104 @@ chrome.storage.sync.get(function (storage) {
 });
 
 // 创建定时同步gitee任务，至于是否真的同步，要看设置
-chrome.alarms.create("checkAutoSyncGitee", {delayInMinutes: 70, periodInMinutes: 70});
+chrome.alarms.create("checkAutoSyncGitee", {delayInMinutes: 5, periodInMinutes: 5});
 
 // 创建定时同步github任务，至于是否真的同步，要看设置
-chrome.alarms.create("checkAutoSyncGithub", {delayInMinutes: 90, periodInMinutes: 90});
+chrome.alarms.create("checkAutoSyncGithub", {delayInMinutes: 5, periodInMinutes: 5});
 chrome.alarms.create("checkWebdavAutoBackup", {delayInMinutes: 60, periodInMinutes: 60});
+
+// ===== 4.2 需求三：Gist 自动备份开关与频率 =====
+// 开关 gistAutoEnabled 没设过时沿用旧的 autoSync 开关，老用户行为不变；频率 5 档（5/15/30/60/120 分钟），默认 30 分钟
+function njGistAutoEnabled(items) {
+    if (typeof items.gistAutoEnabled !== "undefined") {
+        return items.gistAutoEnabled === true;
+    }
+    return items.autoSync === true;
+}
+
+function njGistAutoInterval(items) {
+    let v = parseInt(items.gistAutoIntervalMinutes, 10);
+    return [5, 15, 30, 60, 120].indexOf(v) >= 0 ? v : 30;
+}
+
+// ===== 4.2 需求四：统一操作日志 =====
+// 存 chrome.storage.local 的 njLogs 数组：{t: 时间戳, action: 动作, ok: 成功与否, detail: 简短说明}
+// 绝不记密码/令牌原文。自动清理：logAutoCleanEnabled（默认开）、logKeepDays（默认 30 天）、logKeepCount（默认 500 条）
+function njLogEvent(action, ok, detail) {
+    chrome.storage.local.get(["njLogs", "logAutoCleanEnabled", "logKeepDays", "logKeepCount"], function (st) {
+        let logs = Array.isArray(st.njLogs) ? st.njLogs : [];
+        logs.push({t: Date.now(), action: String(action), ok: !!ok, detail: detail ? String(detail).slice(0, 200) : ""});
+        if (st.logAutoCleanEnabled !== false) {
+            let keepDays = parseInt(st.logKeepDays, 10) || 30;
+            let keepCount = parseInt(st.logKeepCount, 10) || 500;
+            let cutoff = Date.now() - keepDays * 86400000;
+            logs = logs.filter(function (e) { return e && e.t >= cutoff; });
+            if (logs.length > keepCount) {
+                logs = logs.slice(logs.length - keepCount);
+            }
+        }
+        chrome.storage.local.set({njLogs: logs});
+    });
+}
+
+// 内容指纹：判断数据有没有变化（无变化就跳过自动备份）
+function njGistContentHash(content) {
+    let str;
+    try {
+        str = JSON.stringify(content);
+    } catch (e) {
+        return "";
+    }
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) {
+        h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+    }
+    return String(h) + ":" + str.length;
+}
+
+// 待确认的自动备份指纹：推送成功后才落盘，下次同内容就跳过
+let njPendingAutoHash = {github: null, gitee: null};
+
+// 自动备份推送前把关：内容与上次成功推送的一模一样就跳过（记日志 + 更新状态，Gist 页状态行会显示）
+function njGistAutoMaybePush(provider, content, updateFn) {
+    let hashKey = provider === "github" ? "gistAutoHashGithub" : "gistAutoHashGitee";
+    let statusKey = provider === "github" ? "pushToGithubGistStatus" : "pushToGiteeGistStatus";
+    chrome.storage.local.get(hashKey, function (st) {
+        let hash = njGistContentHash(content);
+        if (hash && st[hashKey] === hash) {
+            if (provider === "github") {
+                handleGithubGistLog.push(`${chrome.i18n.getMessage("gistAutoSkippedNoChange")}`);
+            } else {
+                handleGiteeGistLog.push(`${chrome.i18n.getMessage("gistAutoSkippedNoChange")}`);
+            }
+            chrome.storage.local.set({gistAutoLastResult: {provider: provider, result: "skipped", time: Date.now()}});
+            njLogEvent("gistAutoBackupSkipped", true, provider);
+            // 结束本次任务（上面的秒表监听会收尾并把日志落盘）
+            if (provider === "github") {
+                pushToGithubGistStatus = undefined;
+            } else {
+                pushToGiteeGistStatus = undefined;
+            }
+            return;
+        }
+        njPendingAutoHash[provider] = hash;
+        updateFn(content);
+    });
+}
 
 // 检查是否同步github的gist
 function checkAutoSyncGithub() {
     console.log("检查github是否同步")
     chrome.storage.local.get(null, function (items) {
-        let autoSync = items.autoSync
-        if (autoSync === true) {
-            console.log("autoSync open")
-            startPushToGithubGist();
+        if (!njGistAutoEnabled(items)) {
+            return;
         }
+        // 没到设定的间隔就跳过（闹钟每 5 分钟一跳，这里按用户设的频率把关）
+        if (Date.now() - (items.lastGistAutoPushGithub || 0) < njGistAutoInterval(items) * 60000) {
+            return;
+        }
+        chrome.storage.local.set({lastGistAutoPushGithub: Date.now()});
+        startPushToGithubGist();
     });
 }
 
@@ -97,11 +180,14 @@ function checkAutoSyncGithub() {
 function checkAutoSyncGitee() {
     console.log("检查gitee是否同步")
     chrome.storage.local.get(null, function (items) {
-        let autoSync = items.autoSync
-        if (autoSync === true) {
-            console.log("autoSync open")
-            startPushToGiteeGist();
+        if (!njGistAutoEnabled(items)) {
+            return;
         }
+        if (Date.now() - (items.lastGistAutoPushGitee || 0) < njGistAutoInterval(items) * 60000) {
+            return;
+        }
+        chrome.storage.local.set({lastGistAutoPushGitee: Date.now()});
+        startPushToGiteeGist();
     });
 }
 
@@ -345,7 +431,7 @@ function isStoredGithubGistIdLocal(action) {
                     if (!callback || typeof callback == 'undefined') {
                         updateGithubGist([]);
                     } else {
-                        updateGithubGist(callback);
+                        njWithBackupSettings(callback, function (content) { njGistAutoMaybePush("github", content, updateGithubGist); });
                     }
                 })
             }
@@ -371,7 +457,7 @@ function isStoredGiteeGistIdLocal(action) {
                     if (!callback || typeof callback == 'undefined') {
                         updateGiteeGist([]);
                     } else {
-                        updateGiteeGist(callback);
+                        njWithBackupSettings(callback, function (content) { njGistAutoMaybePush("gitee", content, updateGiteeGist); });
                     }
                 })
             }
@@ -418,14 +504,33 @@ function patchGithubGist(files, myHeaders) {
             if (response.status === 200) {
                 console.log("更新成功")
                 handleGithubGistLog.push(`${chrome.i18n.getMessage("updateSuccess")}`)
+                // 自动备份成功：落盘内容指纹和状态（手动触发时指纹为空，不影响）
+                if (njPendingAutoHash.github) {
+                    chrome.storage.local.set({gistAutoHashGithub: njPendingAutoHash.github});
+                    njPendingAutoHash.github = null;
+                }
+                chrome.storage.local.set({gistAutoLastResult: {provider: "github", result: "success", time: Date.now()}});
+                njLogEvent("gistAutoBackup", true, "GitHub");
             } else {
                 console.log("更新失败")
                 handleGithubGistLog.push(`${chrome.i18n.getMessage("updateFailed")}`)
+                njPendingAutoHash.github = null;
+                chrome.storage.local.set({gistAutoLastResult: {provider: "github", result: "failed", time: Date.now(), reason: "HTTP " + response.status}});
+                if (response.status === 403 || response.status === 429) {
+                    // 被限流必须单独记进日志（4.2 需求三/四）
+                    handleGithubGistLog.push(`${chrome.i18n.getMessage("gistRateLimited")} HTTP ${response.status}`)
+                    njLogEvent("gistAutoBackupRateLimited", false, "GitHub HTTP " + response.status);
+                } else {
+                    njLogEvent("gistAutoBackup", false, "GitHub HTTP " + response.status);
+                }
             }
         })
         .catch(error => {
             console.log('error', error)
             handleGithubGistLog.push(`${chrome.i18n.getMessage("updateFailed")}-->${error.toString()}`)
+            njPendingAutoHash.github = null;
+            chrome.storage.local.set({gistAutoLastResult: {provider: "github", result: "failed", time: Date.now(), reason: String(error && error.message || error)}});
+            njLogEvent("gistAutoBackup", false, "GitHub " + String(error && error.message || error));
         })
         .finally(() => {
             console.log('Request completed');
@@ -455,16 +560,32 @@ function updateGiteeGist(content) {
             console.log(response)
             if (response.status === 200) {
                 console.log("更新成功")
-                console.log(response.json())
                 handleGiteeGistLog.push(`${chrome.i18n.getMessage("updateSuccess")}`)
+                if (njPendingAutoHash.gitee) {
+                    chrome.storage.local.set({gistAutoHashGitee: njPendingAutoHash.gitee});
+                    njPendingAutoHash.gitee = null;
+                }
+                chrome.storage.local.set({gistAutoLastResult: {provider: "gitee", result: "success", time: Date.now()}});
+                njLogEvent("gistAutoBackup", true, "Gitee");
             } else {
                 console.log("更新失败")
                 handleGiteeGistLog.push(`${chrome.i18n.getMessage("updateFailed")}`)
+                njPendingAutoHash.gitee = null;
+                chrome.storage.local.set({gistAutoLastResult: {provider: "gitee", result: "failed", time: Date.now(), reason: "HTTP " + response.status}});
+                if (response.status === 403 || response.status === 429) {
+                    handleGiteeGistLog.push(`${chrome.i18n.getMessage("gistRateLimited")} HTTP ${response.status}`)
+                    njLogEvent("gistAutoBackupRateLimited", false, "Gitee HTTP " + response.status);
+                } else {
+                    njLogEvent("gistAutoBackup", false, "Gitee HTTP " + response.status);
+                }
             }
         })
         .catch(error => {
             console.log('error', error)
             handleGiteeGistLog.push(`${chrome.i18n.getMessage("updateFailed")}-->${error.toString()}`)
+            njPendingAutoHash.gitee = null;
+            chrome.storage.local.set({gistAutoLastResult: {provider: "gitee", result: "failed", time: Date.now(), reason: String(error && error.message || error)}});
+            njLogEvent("gistAutoBackup", false, "Gitee " + String(error && error.message || error));
         })
         .finally(() => {
             // 请求完成时触发，无论成功还是失败
@@ -806,21 +927,42 @@ function getShardings(cb) {
 }
 
 // ===== WebDAV 多版本自动备份（阶段4）=====
-// 版本文件名 njtab-backup-YYYYMMDD-HHmmss.json（本地时间）；只认这个命名规则，远端其他文件一律不碰
+// 4.2 需求三：备份包含配置（白名单与 workbench.js 保持一致；WebDAV 连接信息与凭据永不进备份）
+const NJ_BACKUP_SETTING_KEYS = ["themeMode", "options", "dragType", "autoSync", "delRetentionDays", "restoreDiscarded", "webdavAutoBackup", "webdavIntervalHours", "webdavKeepDays", "webdavKeepCount", "gistAutoEnabled", "gistAutoIntervalMinutes", "logAutoCleanEnabled", "logKeepDays", "logKeepCount"];
+
+function njPickBackupSettings(source) {
+    let out = {};
+    if (!source || typeof source !== "object") { return out; }
+    NJ_BACKUP_SETTING_KEYS.forEach(function (key) {
+        if (typeof source[key] !== "undefined") { out[key] = source[key]; }
+    });
+    return out;
+}
+
+function njWithBackupSettings(content, fn) {
+    if (!content || typeof content !== "object" || Array.isArray(content)) { fn(content); return; }
+    chrome.storage.local.get(NJ_BACKUP_SETTING_KEYS, function (items) {
+        let picked = njPickBackupSettings(items || {});
+        if (Object.keys(picked).length) { content.settings = picked; }
+        fn(content);
+    });
+}
+
+// 版本文件名 NJ-Tab-Backup-YYYYMMDD-HHmmss.json（本地时间）；只认这个命名规则，远端其他文件一律不碰（4.2 需求三）
 function njVersionFileName(d) {
     function p(n) { return (n < 10 ? "0" : "") + n; }
-    return "njtab-backup-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + ".json";
+    return "NJ-Tab-Backup-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + ".json";
 }
 
 function njVersionTime(name) {
-    let m = /^njtab-backup-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})\.json$/.exec(name || "");
+    let m = /^NJ-Tab-Backup-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})\.json$/.exec(name || "");
     if (!m) { return null; }
     return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
 }
 
 function njParseVersionNames(text) {
     let found = {};
-    let re = /njtab-backup-\d{8}-\d{6}\.json/g;
+    let re = /NJ-Tab-Backup-\d{8}-\d{6}\.json/g;
     let m;
     while ((m = re.exec(text || "")) !== null) { found[m[0]] = true; }
     return Object.keys(found).sort().reverse();
@@ -853,7 +995,7 @@ function njWebdavAuthHeader(user, password) {
 
 function njWebdavFileUrl(baseUrl, fileName) {
     let base = String(baseUrl || "").trim().replace(/\/+$/, "");
-    let file = String(fileName || "").trim().replace(/^\/+/, "") || "njtab-backup.json";
+    let file = String(fileName || "").trim().replace(/^\/+/, "") || "NJ-Tab-Backup.json";
     let encodedFile = file.split("/").map(function (seg) {
         return encodeURIComponent(seg);
     }).join("/");
@@ -876,6 +1018,7 @@ function njCleanupWebdavVersions(cfg, keepDays, keepCount, protectName) {
         return resp.text();
     }).then(function (text) {
         let dels = njPickDeletions(njParseVersionNames(text), keepDays, keepCount, protectName, Date.now());
+        if (dels.length) { njLogEvent("webdavCleanup", true, dels.length + ""); }
         dels.forEach(function (name) {
             fetch(njWebdavFileUrl(cfg.webdavUrl, name), {
                 method: "DELETE",
@@ -888,9 +1031,9 @@ function njCleanupWebdavVersions(cfg, keepDays, keepCount, protectName) {
 
 // 自动备份检查：开关开着、已配置地址、且距上次成功备份超过设定间隔时，把本地数据作为新版本上传；只上传、从不覆盖本地
 function checkWebdavAutoBackup() {
-    chrome.storage.local.get(["webdavUrl", "webdavUser", "webdavAutoBackup", "webdavIntervalHours", "lastWebdavBackupAt", "webdavKeepDays", "webdavKeepCount"], function (st) {
+    chrome.storage.local.get(["webdavUrl", "webdavUser", "lastWebdavBackupAt"].concat(NJ_BACKUP_SETTING_KEYS), function (st) {
         if (!st.webdavAutoBackup || !st.webdavUrl) { return; }
-        let intervalMs = (parseFloat(st.webdavIntervalHours) || 24) * 3600000;
+        let intervalMs = (parseFloat(st.webdavIntervalHours) || 12) * 3600000;
         if (Date.now() - (st.lastWebdavBackupAt || 0) < intervalMs) { return; }
         njLoadSecretField("webdavPass", function (pass) {
             getShardings(function (items) {
@@ -900,7 +1043,8 @@ function checkWebdavAutoBackup() {
                     appVersion: chrome.runtime.getManifest().version,
                     exportedAt: new Date().toISOString(),
                     tabGroups: Array.isArray(items.tabGroups) ? items.tabGroups : [],
-                    delTabGroups: Array.isArray(items.delTabGroups) ? items.delTabGroups : []
+                    delTabGroups: Array.isArray(items.delTabGroups) ? items.delTabGroups : [],
+                    settings: njPickBackupSettings(st)
                 };
                 let fileName = njVersionFileName(new Date());
                 fetch(njWebdavFileUrl(st.webdavUrl, fileName), {
@@ -914,6 +1058,7 @@ function checkWebdavAutoBackup() {
                 }).then(function (resp) {
                     if (!resp.ok) { throw new Error("HTTP " + resp.status); }
                     chrome.storage.local.set({lastWebdavBackupAt: Date.now()});
+                    njLogEvent("webdavAutoBackup", true, fileName);
                     njCleanupWebdavVersions(
                         {webdavUrl: st.webdavUrl, webdavUser: st.webdavUser || "", webdavPass: pass || ""},
                         st.webdavKeepDays === undefined ? 30 : st.webdavKeepDays,
@@ -921,6 +1066,7 @@ function checkWebdavAutoBackup() {
                         fileName);
                 }).catch(function (err) {
                     console.log("WebDAV 自动备份失败", err);
+                    njLogEvent("webdavAutoBackup", false, String(err && err.message || err));
                 });
             });
         });
@@ -932,8 +1078,8 @@ chrome.idle.onStateChanged.addListener(function (newState) {
     console.log(newState)
     if (newState === "active") {
         if (isLock) {
-            chrome.alarms.create("checkAutoSyncGitee", {delayInMinutes: 70, periodInMinutes: 70});
-            chrome.alarms.create("checkAutoSyncGithub", {delayInMinutes: 90, periodInMinutes: 90});
+            chrome.alarms.create("checkAutoSyncGitee", {delayInMinutes: 5, periodInMinutes: 5});
+            chrome.alarms.create("checkAutoSyncGithub", {delayInMinutes: 5, periodInMinutes: 5});
 chrome.alarms.create("checkWebdavAutoBackup", {delayInMinutes: 60, periodInMinutes: 60});
             isLock = false;
         }

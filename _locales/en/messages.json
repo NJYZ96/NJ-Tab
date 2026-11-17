@@ -27,13 +27,13 @@
 		"message": "I am dead line"
 	},
 	"optionsValue": {
-		"message": "Options"
+		"message": "Settings"
 	},
 	"restoreKey": {
 		"message": "On clicking \"Restore group\" or restoring a single tab:"
 	},
 	"restoreValueDelete": {
-		"message": " Delete opened links from tab groups(When the tag group is locked, do not delete)"
+		"message": " When a tab is opened with a left click, remove it from the tab list (middle click never removes it; locked groups are never removed)"
 	},
 	"restoreValueLive": {
 		"message": "  Leave the links alone"
@@ -399,7 +399,7 @@
 		"message": "Error!"
 	},
 	"goToOptions": {
-		"message": "Please go to the options page for configuration."
+		"message": "Please set the token on the Gist backup page first!"
 	},
 	"githubToken": {
 		"message": "GitHub Token"
@@ -521,6 +521,123 @@
 	"backupImportSuccess": {
 		"message": "Import finished, the page will reload."
 	},
+	"settingsAlsoRestored": {
+		"message": "Settings from the backup were also restored."
+	},
+	"gistAutoSkippedNoChange": {
+		"message": "Auto backup skipped: no changes since last backup"
+	},
+	"gistRateLimited": {
+		"message": "Rate limited by the service: "
+	},
+	"logPanelTitle": {
+		"message": "Operation log"
+	},
+	"logAutoClean": {
+		"message": "Auto-clean old logs"
+	},
+	"logKeepDays": {
+		"message": "Keep days"
+	},
+	"logKeepCount": {
+		"message": "Max entries"
+	},
+	"logSuccess": {
+		"message": "Success"
+	},
+	"logFailed": {
+		"message": "Failed"
+	},
+	"logEmpty": {
+		"message": "No entries yet."
+	},
+	"logAction_gistPush": {
+		"message": "Gist push"
+	},
+	"logAction_gistPull": {
+		"message": "Gist pull"
+	},
+	"logAction_gistAutoBackup": {
+		"message": "Gist auto backup"
+	},
+	"logAction_gistAutoBackupSkipped": {
+		"message": "Gist auto backup skipped (no changes)"
+	},
+	"logAction_gistRateLimited": {
+		"message": "Gist backup rate limited"
+	},
+	"logAction_gistAutoBackupRateLimited": {
+		"message": "Gist auto backup rate limited"
+	},
+	"logAction_webdavUpload": {
+		"message": "WebDAV upload backup"
+	},
+	"logAction_webdavRestore": {
+		"message": "WebDAV restore"
+	},
+	"logAction_webdavForceBackup": {
+		"message": "Forced backup before restore"
+	},
+	"logAction_webdavAutoBackup": {
+		"message": "WebDAV auto backup"
+	},
+	"logAction_webdavCleanup": {
+		"message": "WebDAV old version cleanup"
+	},
+	"logAction_exportBackup": {
+		"message": "Export backup file"
+	},
+	"logAction_exportPage": {
+		"message": "Export web page file"
+	},
+	"logAction_importBackup": {
+		"message": "Import backup"
+	},
+	"logAction_trashAutoClean": {
+		"message": "Trash auto cleanup"
+	},
+	"logAction_dataConvert": {
+		"message": "Local data conversion"
+	},
+	"navGistBackup": {
+		"message": "Gist backup"
+	},
+	"navWebdav": {
+		"message": "WebDAV"
+	},
+	"importExport": {
+		"message": "Import / Export"
+	},
+	"gistAutoBackupTitle": {
+		"message": "Gist auto backup"
+	},
+	"gistAutoBackupEnable": {
+		"message": "Auto backup to Gist"
+	},
+	"gistAutoInterval": {
+		"message": "Auto backup interval (minutes)"
+	},
+	"gistAutoRateWarn": {
+		"message": "Note: Short intervals may get rate limited by GitHub/Gitee. Rate limiting is recorded in the log."
+	},
+	"gistAutoStatusLabel": {
+		"message": "Auto backup status"
+	},
+	"gistAutoStatusSuccess": {
+		"message": "Last auto backup succeeded"
+	},
+	"gistAutoStatusSkipped": {
+		"message": "Last auto backup skipped: no changes"
+	},
+	"gistAutoStatusFailed": {
+		"message": "Last auto backup failed"
+	},
+	"gistAutoStatusNone": {
+		"message": "No auto backup yet"
+	},
+	"usageOfRef": {
+		"message": " (of the 10 MB reference)"
+	},
 	"htmlExportTitle": {
 		"message": "Tabs exported from NJ-Tab"
 	},
@@ -562,6 +679,27 @@
 	},
 	"webdavUploadSuccess": {
 		"message": "Upload succeeded, the backup is now stored on WebDAV."
+	},
+	"webdavTest": {
+		"message": "Test connection"
+	},
+	"webdavTestSuccess": {
+		"message": "Connection succeeded. The address, account and password are correct."
+	},
+	"webdavTestFailed": {
+		"message": "Connection failed: "
+	},
+	"webdavVersionDelete": {
+		"message": "Delete"
+	},
+	"webdavVersionDeleteConfirm": {
+		"message": "Delete this backup version from the server? This cannot be undone:"
+	},
+	"webdavVersionDeleteFailed": {
+		"message": "Failed to delete version: "
+	},
+	"webdavNoVersions": {
+		"message": "No backup versions on the server yet."
 	},
 	"webdavUploadFailed": {
 		"message": "Upload failed, and your local data was not changed. Please check the server address, username, password and network, then try again. Details:"
