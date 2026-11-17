@@ -1,8 +1,8 @@
-# N-Tab
+# NJ-Tab
 
 **目录**
 ----
-* [N-Tab](#N-Tab)
+* [NJ-Tab](#NJ-Tab)
     * [背景介绍](#背景介绍)
     * [模拟使用场景](#模拟使用场景)
     * [支持多款浏览器](#支持多款浏览器)
@@ -18,7 +18,7 @@
 
 ## 背景介绍
 
-0. 改名N-Tab，方便口头传播，之前的名字太中二了，Orz
+0. 本项目由上游 N-Tab 定制演进，现统一更名为 NJ-Tab
 1. 本项目是一个Chrome插件
 2. 经过4年时间自用，敢保证永不丢失数据，速度超快，可存储数据超多，绝对是效率提升工具！
 3. OneTab的平替，OneTab丢过数据的举手集合！
@@ -31,25 +31,22 @@
 - 可以做历史时间线回顾，看看一个星期前，一个月前，都在看什么资料，关注什么内容
 
 ## 支持多款浏览器
-- 谷歌 Chrome 浏览器：[Chrome商店](https://chrome.google.com/webstore/detail/cloudskymonster/niahhcandihcfbamcfhikgojghnnfjan)
-- 微软 Edge 浏览器：[Edge商店](https://microsoftedge.microsoft.com/addons/detail/cloudskymonster/hfinincbgekmplkkhnpaodhconghkboh)
+- 支持 Chrome、Edge 等 Chromium 内核浏览器；本插件暂未上架应用商店，请按下方「安装方法」从本仓库下载安装
 
 ## 快速使用
 
 - **PS：** 不想看长篇大论的介绍和功能说明，直接看[安装方法](#安装方法)
 - 点击插件图标，会打开后台管理页
-- 在任何打开的网页（包括本地打开的文件，如PDF，视频，照片），空白处直接右键点击，找到N-Tab，有多种功能可选
+- 在任何打开的网页（包括本地打开的文件，如PDF，视频，照片），空白处直接右键点击，找到NJ-Tab，有多种功能可选
 - 在任何打开的网页（包括本地打开的文件，如PDF，视频，照片），按快捷键Ctrl+Q，可以**发送所有标签**
 - 在任何打开的网页（包括本地打开的文件，如PDF，视频，照片），按快捷键Alt+Q，可以**发送当前标签**
-- 如需要定时同步功能，请配置GitHub或Gitee的token，可二选一或全配置
+- 如需要定时备份功能，请配置GitHub或Gitee的token，可二选一或全配置
 - [查看全功能介绍（详细啰嗦版）](README_ALL.md)
-- 关于暗黑模式，折腾了一下发现，Chrome浏览器自带的暗黑模式效果就很不错，就没有另外添加了。[暗黑模式开启方法](#暗黑模式开启方法)
+- 本插件已内置暗黑模式（跟随系统/浅色/深色可切换）和宽屏两列布局，在「其他功能」-「查看配置」里设置
 
 ## 安装方法
 
-0. 直接在Chrome插件商店下载安装，[地址](https://chrome.google.com/webstore/detail/cloudskymonster/niahhcandihcfbamcfhikgojghnnfjan)
-
-1. 或者直接下载[最新的crx或zip](https://github.com/scoful/cloudSkyMonster/releases)文件，右键选择解压缩到文件名，不要解压缩到当前目录，或者直接下载源码；
+1. 或者直接下载[最新的crx或zip](https://github.com/NJYZ96/NJ-Tab/releases)文件，右键选择解压缩到文件名，不要解压缩到当前目录，或者直接下载源码；
 
 2. 打开Chrome浏览器或其他支持Chrome内核的浏览器，找到并点开“扩展程序”项；
 
@@ -61,13 +58,13 @@
 
 6. 建议插件安装成功后，关闭开发者模式。
 
-7. 现在就可以正常使用了，假如需要同步功能，先[获取GitHub和Gitee的token](#获取token方法)，在“其他功能”-“查看配置”里对应的地方填写token，然后在“同步功能”-“是否自动同步”选是；
+7. 现在就可以正常使用了，假如需要备份功能，先[获取GitHub和Gitee的token](#获取token方法)，在“其他功能”-“查看配置”里对应的地方填写token，然后在“备份功能”-“是否自动备份”选是；
 
-8. 2个同步平台，可以同时配置，也可以只配置1个，不冲突，假如选了自动同步，会自动无感知的**定时**同步到2个平台里（请先手动同步一次，通过查看日志，检查链路是否通顺），注意：Gitee特别设置了只要有修改就无感知自动**实时**同步，也就是说只要有修改，删除，移动等动作，就自动实时同步到Gitee，选Gitee更保险，真.理论上永不丢失数据。
+8. 2个备份平台，可以同时配置，也可以只配置1个，不冲突，假如选了自动备份，会自动无感知的**定时**备份到2个平台里（请先手动备份一次，通过查看日志，检查链路是否通顺），注意：Gitee特别设置了只要有修改就无感知自动**实时**备份，也就是说只要有修改，删除，移动等动作，就自动实时备份到Gitee，选Gitee更保险，真.理论上永不丢失数据。
 
 ## 功能界面截图
 - 后台管理页面截图 ![1](https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/11.png)
-- 同步功能截图![2](https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/22.png)
+- 备份功能截图![2](https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/22.png)
 - 其他功能截图 ![3](https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/33.png)
 - 回收站截图 ![4](https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/44.png)
 - 暗黑模式截图 ![5](https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/55.png)
@@ -88,14 +85,17 @@
 
 
 ## 暗黑模式开启方法
-### (可选)Win10本身变成暗黑模式
-- Windows 设置--个性化--颜色--选择颜色(自定义)--选择默认应用模式(暗)--这就是系统级别的暗黑模式，所有支持暗黑模式的软件都会自动变成暗黑模式
-![看图](https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/20240314115936.png)
+- 本插件已内置暗黑模式：进入后台管理页，在「其他功能」-「查看配置」里可选择跟随系统、浅色或深色，无需再改浏览器设置。
 
-### 只是网页内容变成暗黑模式
-- 打开Chrome浏览器，输入 **Chrome://flags**，在搜索框输入**Auto Dark Mode for Web Contents**，在找到的设置右边改成**Enabled**
-- 重启Chrome浏览器，这样本插件就自动变成暗黑模式了！
-![看图2](https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/20240314120003.png)
+## 4.x 主要功能
+
+- 暗黑模式（跟随系统/浅色/深色）与宽屏两列布局
+- 单文件导出（网页版/完整备份）与完整备份导入，导出不再丢时间
+- Gist 备份：GitHub/Gitee 定时自动推送备份，手动拉取恢复；覆盖操作需 2 次确认（第二次输入 Y）
+- WebDAV 多版本自动备份：每次备份是带时间戳的新文件，可按保留天数/份数自动清理旧版本；恢复时可选历史版本，且恢复前会强制先备份当前数据
+- 回收站按保留天数自动清理
+- 全局搜索、标签组备注、恢复标签时可休眠打开
+- 密码与 token 本机加密存储，不明文保存
 
 ## To Do List
 
@@ -106,16 +106,8 @@
 
 ## Discussing
 
-- [在GitHub上提问](https://github.com/scoful/cloudSkyMonster/issues/new "在GitHub上提问")
-- wechat：scoful
-- QQ：1269717999
-- email：1269717999@qq.com
+- [在GitHub上提问](https://github.com/NJYZ96/NJ-Tab/issues/new "在GitHub上提问")
 
-
-
-![微信赞赏码](https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/wx.jpg)
-
-![支付宝赞赏码](https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/zfb.jpg)
 
 
 ------
@@ -148,13 +140,12 @@
 
 [Bootstrap中文网](https://www.bootcss.com/)
 
-[腾讯交互翻译](https://transmart.qq.com/zh-CN/index)
 
 [辅助生成百度统计插件](https://github.com/krapnikkk/baidutongji-generator)
 
 ## Star历史
 
-[![Star History Chart](https://starchart.cc/scoful/cloudSkyMonster.svg)](https://starchart.cc/scoful/cloudSkyMonster)
+[![Star History Chart](https://starchart.cc/NJYZ96/NJ-Tab.svg)](https://starchart.cc/NJYZ96/NJ-Tab)
 
-You are my ![Visitor Count](https://profile-counter.glitch.me/scoful/count.svg)th visitor
+You are my ![Visitor Count](https://profile-counter.glitch.me/NJYZ96/count.svg)th visitor
 

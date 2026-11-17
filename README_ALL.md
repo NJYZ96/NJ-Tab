@@ -1,8 +1,8 @@
-# N-Tab
+# NJ-Tab
 
 **目录**
 ----
-* [N-Tab](#N-Tab)
+* [NJ-Tab](#NJ-Tab)
     * [背景介绍](#背景介绍)
     * [快速使用](#快速使用)
     * [实现功能](#实现功能)
@@ -18,36 +18,32 @@
 
 ## 背景介绍
 
-0. 改名N-Tab，方便口头传播，之前的名字太中二了，Orz
+0. 本项目由上游 N-Tab 定制演进，现统一更名为 NJ-Tab
 1. 本项目是一个Chrome插件
 2. 经过4年时间自用，敢保证永不丢失数据，速度超快，可存储数据超多，绝对是效率提升工具！
 3. 说说OneTab插件，刚开始使用的童鞋估计都会跟我一样感觉相见恨晚，惊叹怎么那么好用呢！特别是对于那些喜欢开很多tab但是就不想关的童鞋，鼠标一点就所有tab全部关闭并收集到后台管理页了，方便后面慢慢看，简直不要太舒服。但是呢，如果长时间使用，有几率触发bug，所有保存的tab的记录都不见了。找不回来的那种痛！本人经历了至少三次了Orz:sob:！OneTab的数据是存储在浏览器的storage里的，丢了后真的就找不回来了，~~而且OneTab已经好久好久没更新了，作者也联系不上~~，已经有更新了，但还不如不更新，会有同步bug，直接丢失所有数据。痛定思痛，本插件实现了类似OneTab的功能，并且利用了GitHub和Gitee的gist来**实时**远程保存，本地+远程=双保存双保险，妈妈再也不用担心我丢了收集了好久的数据了。那些历史久远的，想等等再看，然后几年都没去看的那些网址:flushed:，一切都有记录在案。甚至可以帮助回忆某年某日做了什么，为什么会打开这些网址！
 
 ## 支持多款浏览器
-- 谷歌 Chrome 浏览器：[Chrome商店](https://chrome.google.com/webstore/detail/cloudskymonster/niahhcandihcfbamcfhikgojghnnfjan)
-- 微软 Edge 浏览器：[Edge商店](https://microsoftedge.microsoft.com/addons/detail/cloudskymonster/hfinincbgekmplkkhnpaodhconghkboh)
+- 支持 Chrome、Edge 等 Chromium 内核浏览器；本插件暂未上架应用商店，请按下方「安装方法」从本仓库下载安装
 
 
 ## 快速使用
 
 - **PS：** 不想看长篇大论的介绍和功能说明，直接看[安装方法](#安装方法)
 - 点击插件图标，会打开后台管理页
-- 在任何打开的网页（包括本地打开的文件，如PDF，视频，照片），空白处直接右键点击，找到N-Tab，有多种功能可选
+- 在任何打开的网页（包括本地打开的文件，如PDF，视频，照片），空白处直接右键点击，找到NJ-Tab，有多种功能可选
 - 在任何打开的网页（包括本地打开的文件，如PDF，视频，照片），按快捷键Ctrl+Q，可以**发送所有标签**
 - 在任何打开的网页（包括本地打开的文件，如PDF，视频，照片），按快捷键Alt+Q，可以**发送当前标签**
-- 如需要定时同步功能，请配置GitHub或Gitee的token，可二选一或全配置
-- 关于暗黑模式，折腾了一下发现，Chrome浏览器自带的暗黑模式效果就很不错，就没有另外添加了。[暗黑模式开启方法](#暗黑模式开启方法)
+- 如需要定时备份功能，请配置GitHub或Gitee的token，可二选一或全配置
+- 本插件已内置暗黑模式（跟随系统/浅色/深色可切换）和宽屏两列布局，在「其他功能」-「查看配置」里设置
 
 
 
 ## 实现功能
 
-1. 划词翻译
-    - 支持配置是否启用，自动检测中文还是英文，互译
+1. 插件图标显示当前一共打开了多少个tab，多个窗口也能统计
 
-2. 插件图标显示当前一共打开了多少个tab，多个窗口也能统计
-
-3. 类似OneTab的功能
+2. 类似OneTab的功能
     - 支持**发送所有标签**并关闭页面
     - 支持**发送当前标签**并关闭页面
     - 支持**发送其他标签**并关闭页面
@@ -57,7 +53,7 @@
     - 支持快捷键Ctrl+q，触发**发送所有标签**
     - 支持快捷键Alt+q，触发**发送当前标签**
     - 支持手动多选标签后，快捷键Alt+q，触发**发送当前标签**，而实现一次性发送多个标签
-    - 支持在新增标签和删除标签的时候自动同步到Gitee的gist（使用这个功能请先手动同步一次，然后查看日志，检查链路是否通顺），ps：基于某个墙和网络的原因，只会实时自动同步到Gitee，定时自动同步功能2个平台都可以
+    - 支持在新增标签和删除标签的时候自动备份到Gitee的gist（使用这个功能请先手动备份一次，然后查看日志，检查链路是否通顺），ps：基于某个墙和网络的原因，只会实时自动备份到Gitee，定时自动备份功能2个平台都可以
     - 支持把从OneTab导出的内容直接导入本插件
     - 支持导出本插件格式的内容
     - 支持把从本插件导出的内容重新导入
@@ -66,9 +62,9 @@
     - 后台管理页支持超级拖曳tab组和单个tab
     - 支持显示当前已用存储空间storage/总存储空间storage或已用百分比
     - 支持手动push或pull到GitHub的gist
-    - 支持自动push到GitHub的gist，即自动定时同步到GitHub的gist
+    - 支持自动push到GitHub的gist，即自动定时备份到GitHub的gist
     - 支持手动push或pull到Gitee的gist
-    - 支持自动push到Gitee的gist，即自动定时同步到Gitee的gist
+    - 支持自动push到Gitee的gist，即自动定时备份到Gitee的gist
     - 支持查看跟gist操作有关的log记录，日志记录只保存最新100条
     - 支持单击标签组显示的**标签个数**时，收起或展开效果
     - 支持**锁定或解锁整个标签组**，即锁定后标签组和标签不能删除，不能拖曳，但能被占位
@@ -77,14 +73,21 @@
     - 支持**回收站**，所有在管理页面被删掉的东西，都会存到回收站里，回收站里的标签可以恢复，也可以彻底删除
 
 
-4. 中英国际化切换，渣渣英语，渣渣翻译，包涵包涵
+3. 中英国际化切换，渣渣英语，渣渣翻译，包涵包涵
+
+4. 4.x 新增与改进
+    - 暗黑模式（跟随系统/浅色/深色）与宽屏两列布局
+    - 单文件导出（网页版/完整备份）与完整备份导入，导出不再丢时间
+    - WebDAV 多版本自动备份：每次备份是带时间戳的新文件，可按保留天数/份数自动清理旧版本；恢复时可选历史版本，恢复前会强制先备份当前数据
+    - 覆盖类操作（Gist 推送/拉取、WebDAV 恢复）改用页面内弹窗 2 次确认，第二次需输入字母 Y
+    - 回收站按保留天数自动清理
+    - 全局搜索、标签组备注、恢复标签时可休眠打开
+    - 密码与 token 本机加密存储，不明文保存
 
 
 ## 安装方法
 
-0. 直接在Chrome插件商店下载安装，[地址](https://chrome.google.com/webstore/detail/cloudskymonster/niahhcandihcfbamcfhikgojghnnfjan)
-
-1. 或者直接下载[最新的crx或zip](https://github.com/scoful/cloudSkyMonster/releases)文件，右键选择解压缩到文件名，不要解压缩到当前目录，或者直接下载源码；
+1. 或者直接下载[最新的crx或zip](https://github.com/NJYZ96/NJ-Tab/releases)文件，右键选择解压缩到文件名，不要解压缩到当前目录，或者直接下载源码；
 
 2. 打开Chrome浏览器或其他支持Chrome内核的浏览器，找到并点开“扩展程序”项；
 
@@ -96,9 +99,9 @@
 
 6. 建议插件安装成功后，关闭开发者模式。
 
-7. 现在就可以正常使用了，假如需要同步功能，先[获取GitHub和Gitee的token](#获取token方法)，在“其他功能”-“查看配置”里对应的地方填写token，然后在“同步功能”-“是否自动同步”选是；
+7. 现在就可以正常使用了，假如需要备份功能，先[获取GitHub和Gitee的token](#获取token方法)，在“其他功能”-“查看配置”里对应的地方填写token，然后在“备份功能”-“是否自动备份”选是；
 
-8. 2个同步平台，可以同时配置，也可以只配置1个，不冲突，假如选了自动同步，会自动无感知的**定时**同步到2个平台里，注意：Gitee特别设置了只要有修改就无感知自动**实时**同步，也就是说只要有修改，删除，移动等动作，就自动实时同步到Gitee，选Gitee更保险，真.理论上永不丢失数据。
+8. 2个备份平台，可以同时配置，也可以只配置1个，不冲突，假如选了自动备份，会自动无感知的**定时**备份到2个平台里，注意：Gitee特别设置了只要有修改就无感知自动**实时**备份，也就是说只要有修改，删除，移动等动作，就自动实时备份到Gitee，选Gitee更保险，真.理论上永不丢失数据。
 
 
 ## 获取token方法
@@ -115,26 +118,14 @@
 - 提交后，输入密码，生成后，要把显示的token另外找地方备份记录一下，只有在第一次创建的时候才会显示的，错过了只能重来。
 
 ## 暗黑模式开启方法
-### (可选)Win10本身变成暗黑模式
-- Windows 设置--个性化--颜色--选择颜色(自定义)--选择默认应用模式(暗)--这就是系统级别的暗黑模式，所有支持暗黑模式的软件都会自动变成暗黑模式
-  ![看图](https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/20240314115936.png)
-
-### 只是网页内容变成暗黑模式
-- 打开Chrome浏览器，输入 **Chrome://flags**，在搜索框输入**Auto Dark Mode for Web Contents**，在找到的设置右边改成**Enabled**
-- 重启Chrome浏览器，这样本插件就自动变成暗黑模式了！
-  ![看图2](https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/20240314120003.png)
+- 本插件已内置暗黑模式：进入后台管理页，在「其他功能」-「查看配置」里可选择跟随系统、浅色或深色，无需再改浏览器设置。
 
 ## 使用方法
-1. 打开某个网页，文字翻译，用法如下：
-
-    - 在后台管理页菜单**其他功能**，**是否划词翻译**，配置是否启用，默认关闭
-    - 双击或是鼠标滑动选择文字，自动弹框，得到翻译结果，弹框有2种方式消除，一种是鼠标在页面再点一下就直接消除，一种是等3秒自动消除。
-
-2. 左键点击插件图标，会打开后台管理页；
+1. 左键点击插件图标，会打开后台管理页；
 
 
 3. 右键点击插件图标
-    - **N-Tab**，点击会打开GitHub项目地址；
+    - **NJ-Tab**，点击会打开GitHub项目地址；
     - **发送当前标签**，点击会发送当前标签到后台管理页并关闭当前页面
     - **打开后台管理页**，点击会打开后台管理页；
     - **发送所有标签**，点击会发送所有标签到后台管理页并关闭所有页面
@@ -143,7 +134,7 @@
     - **发送右侧所有标签**，点击会发送除了当前标签的右侧标签到后台管理页并关闭其他页面
 
 
-4. 在任何打开的网页（包括本地打开的文件，如PDF，视频，照片），空白处直接右键，找到N-Tab，可以点击**3**里的所有功能
+4. 在任何打开的网页（包括本地打开的文件，如PDF，视频，照片），空白处直接右键，找到NJ-Tab，可以点击**3**里的所有功能
 
 5. 在任何打开的网页（包括本地打开的文件，如PDF，视频，照片）
     - 按快捷键**Ctrl+Q**，会触发**发送所有标签**
@@ -168,15 +159,15 @@
 
 12. 手动push或pull到GitHub或者Gitee的gist
 
-    进入后台管理页，点击**同步功能**，有五个选项，**推送到GitHub的gist里**，**从GitHub的gist里拉取**，**推送到Gitee的gist里**，**从Gitee的gist里拉取**，按字面意思选择功能，这里面会有个token的强制要求，这个token用于授权，[获取GitHub和Gitee的token](#获取token方法)
+    进入后台管理页，点击**备份功能**，有五个选项，**推送到GitHub的gist里**，**从GitHub的gist里拉取**，**推送到Gitee的gist里**，**从Gitee的gist里拉取**，按字面意思选择功能，这里面会有个token的强制要求，这个token用于授权，[获取GitHub和Gitee的token](#获取token方法)
 
 
-13. 自动定时同步功能
+13. 自动定时备份功能
 
-    点击**同步功能**，勾选了自动同步后，（使用这个功能请先手动同步一次，然后查看日志，检查链路是否通顺）
-    - 会定时自动同步到GitHub(每隔90分钟)和Gitee(每隔70分钟)，目前是写死的时间间隔，同步操作记录会写在日志里(就算选了不自动同步也会有日志)
-    - 2个同步平台，可以同时配置，也可以只配置1个，不冲突
-    - 注意：Gitee特别设置了只要有修改就无感知自动**实时**同步，也就是说只要有修改，删除，移动等动作，就自动实时同步到Gitee，选Gitee更保险，真.理论上永不丢失数据。
+    点击**备份功能**，勾选了自动备份后，（使用这个功能请先手动备份一次，然后查看日志，检查链路是否通顺）
+    - 会定时自动备份到GitHub(每隔90分钟)和Gitee(每隔70分钟)，目前是写死的时间间隔，备份操作记录会写在日志里(就算选了不自动备份也会有日志)
+    - 2个备份平台，可以同时配置，也可以只配置1个，不冲突
+    - 注意：Gitee特别设置了只要有修改就无感知自动**实时**备份，也就是说只要有修改，删除，移动等动作，就自动实时备份到Gitee，选Gitee更保险，真.理论上永不丢失数据。
 
 15. 日志功能
 
@@ -211,7 +202,7 @@
 
 - 万丈高楼平地起，感谢小茗同学的这个博文，看完这个就懂怎么开发插件了，[《Chrome插件开发全攻略》配套完整Demo](https://github.com/sxei/chrome-plugin-demo)
 
-- 本插件存的网址是放在浏览器的storage里的，chrome的storage分sync storage和local storage，顾名思义，一种是可同步的，一种是只本地的，sync storage需要登录chrome的设备之间才会同步。但是呢，sync storage的总存放空间太小了，只有102400字节=100kb，而local storage，总大小有5242880字节=5mb，所以本插件使用的是local storage，如果想实现tab同步的话，可以push到gist，再从另一台机子pull下来。
+- 本插件存的网址是放在浏览器的storage里的，chrome的storage分sync storage和local storage，顾名思义，一种是可同步的，一种是只本地的，sync storage需要登录chrome的设备之间才会同步。但是呢，sync storage的总存放空间太小了，只有102400字节=100kb，而local storage，总大小有5242880字节=5mb，所以本插件使用的是local storage，如果想在多台设备间转移tab的话，可以push到gist，再从另一台机子pull下来。
 
 - 不明来历的插件不要随便装，插件的权限太高了，很危险，比如可以直接替换原来的js里的function，可以直接获取原来js里定义的变量，可以直接覆盖掉原来的html结构，可以直接使用cookies，可以在对方没有公开api的情况下直接模拟，可以随便跨域，可以直接对http请求做拦截，注入，加Referer等等。
 
@@ -228,8 +219,6 @@
 - Gitee用的数据库是mysql，而且是不支持保存emoji表情的，:weary:，可能是版本太低也可能是字符集问题。
 
 - GitHub的api，如果返回的数据太大，会进行截断，需要注意，而Gitee的就不会，可能没考虑过这个问题
-
-- 翻译用的是腾讯交互翻译api，[腾讯交互翻译](https://transmart.qq.com/zh-CN/index)，自己扒的api
 
 - GitHub的根据gistId获取gist，居然不用token也能获取私有的，理论上存在被人撞到私有gist的可能，Gitee则需要
 
@@ -249,16 +238,8 @@
 
 ## Discussing
 
-- [在GitHub上提问](https://github.com/scoful/cloudSkyMonster/issues/new "在GitHub上提问")
-- wechat：scoful
-- QQ：1269717999
-- email：1269717999@qq.com
+- [在GitHub上提问](https://github.com/NJYZ96/NJ-Tab/issues/new "在GitHub上提问")
 
-
-
-![微信赞赏码](https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/wx.jpg)
-
-![支付宝赞赏码](https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/zfb.jpg)
 
 
 ------
@@ -291,13 +272,12 @@
 
 [Bootstrap中文网](https://www.bootcss.com/)
 
-[腾讯交互翻译](https://transmart.qq.com/zh-CN/index)
 
 [辅助生成百度统计插件](https://github.com/krapnikkk/baidutongji-generator)
 
 ## Star历史
 
-[![Star History Chart](https://starchart.cc/scoful/cloudSkyMonster.svg)](https://starchart.cc/scoful/cloudSkyMonster)
+[![Star History Chart](https://starchart.cc/NJYZ96/NJ-Tab.svg)](https://starchart.cc/NJYZ96/NJ-Tab)
 
-You are my ![Visitor Count](https://profile-counter.glitch.me/scoful/count.svg)th visitor
+You are my ![Visitor Count](https://profile-counter.glitch.me/NJYZ96/count.svg)th visitor
 

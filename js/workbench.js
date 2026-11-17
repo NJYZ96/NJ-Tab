@@ -240,7 +240,7 @@
                 }
             }
         }
-        return {ok: true, error: ""};
+        return {ok: true, error: "", appVersion: typeof obj.appVersion === "string" ? obj.appVersion : null};
     }
 
     // 构建导出网页文件（单个 .html）的全部内容。
@@ -2151,8 +2151,72 @@ https://www.google.com | Google
         setTimeout(function () { $('#njSecretInput').focus(); }, 300);
     }
 
+    // 只做第 2 步的输 Y 确认弹窗：第 1 步确认与中间步骤由调用方串联（用于恢复前强制备份流程）
+    function showYConfirm(title, message, onConfirm) {
+        let modalHtml = `
+        <div class="modal fade" id="confirmationModal" tabindex="-1" role="dialog" aria-labelledby="confirmationModalLabel" aria-hidden="true">
+          <div class="modal-dialog" role="document">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title" id="confirmationModalLabel">${title}</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                  <span aria-hidden="true">&times;</span>
+                </button>
+              </div>
+              <div class="modal-body">
+                <p>${message}</p>
+                <p>${chrome.i18n.getMessage("njTypeYHint")}</p>
+                <input type="text" class="form-control" id="njConfirmYInput" maxlength="1" autocomplete="off" placeholder="Y">
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">${chrome.i18n.getMessage("njCancel")}</button>
+                <button type="button" class="btn btn-danger" id="njConfirmExecBtn" disabled>${chrome.i18n.getMessage("njExecute")}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+            `;
+
+        let modalContainer = document.createElement('div');
+        modalContainer.innerHTML = modalHtml;
+        document.body.appendChild(modalContainer);
+
+        $('#confirmationModal').modal('show');
+
+        $('#njConfirmYInput').on('input', function () {
+            let ok = $(this).val().trim().toUpperCase() === 'Y';
+            $('#njConfirmExecBtn').prop('disabled', !ok);
+        });
+
+        $('#njConfirmYInput').on('keydown', function (e) {
+            if (e.key === 'Enter' && !$('#njConfirmExecBtn').prop('disabled')) {
+                $('#njConfirmExecBtn').click();
+            }
+        });
+
+        $('#njConfirmExecBtn').on('click', function () {
+            $('#confirmationModal').modal('hide');
+            onConfirm();
+        });
+
+        setTimeout(function () { $('#njConfirmYInput').focus(); }, 300);
+    }
+
+    // 版本号比较：a 比 b 新返回正数，旧返回负数，相同返回 0
+    function njVersionCompare(a, b) {
+        let pa = String(a).split(".").map(function (x) { return parseInt(x, 10) || 0; });
+        let pb = String(b).split(".").map(function (x) { return parseInt(x, 10) || 0; });
+        for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+            let d = (pa[i] || 0) - (pb[i] || 0);
+            if (d !== 0) { return d; }
+        }
+        return 0;
+    }
+
     // 本地旧数据一次性转换（阶段3）：3.1 的标签组缺 note/deletedAt 字段时补默认值并写回，只加字段不改已有值
     function njMigrateLocalDataOnce() {
+        // 旧快照机制已删除（阶段5）：升级时顺手清掉遗留的快照键
+        chrome.storage.local.remove("webdavRestoreSnapshot");
         chrome.storage.local.get("njDataConverted41", function (items) {
             if (items.njDataConverted41) { return; }
             getShardings(function (data) {
@@ -3342,19 +3406,18 @@ https://www.google.com | Google
         });
     }
 
-    // 从 WebDAV 恢复：先确认 → GET 下载 → 按完整备份的规则严格校验 →
-    // 覆盖前先把当前本地数据快照存到 webdavRestoreSnapshot 键（含时间戳）→ 再整体替换两套数据
-    // 任何一步失败都不会改本地数据
+    // 从 WebDAV 恢复（阶段5）：先下载并校验 → 第 1 次确认 → 强制备份当前数据为一个新版本 → 第 2 次输 Y 确认 → 才覆盖本地
+    // 强制备份失败立即中止、本地数据不动；旧快照机制已删除
     function restoreBackupFromWebDav(targetFile) {
         let cfg = readWebDavConfig();
         if (!cfg || !cfg.webdavUrl) {
             showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavConfigMissing")}`);
             return;
         }
-        showDoubleConfirmation(`${chrome.i18n.getMessage("webdavTitle")}`, `${chrome.i18n.getMessage("webdavRestoreConfirm")}`, function () {
-        fetch(buildWebDavFileUrl(cfg.webdavUrl, targetFile || cfg.webdavFile), {
+        let fileName = targetFile || cfg.webdavFile;
+        fetch(buildWebDavFileUrl(cfg.webdavUrl, fileName), {
             method: "GET",
-            // 同上传：认证只走 Authorization 头，避免 401 时被浏览器认证框挂起（见 uploadBackupToWebDav 注释）
+            // 认证只走 Authorization 头，避免 401 时被浏览器认证框挂起（同上传）
             credentials: "omit",
             headers: {"Authorization": buildBasicAuthHeader(cfg.webdavUser, cfg.webdavPass)}
         }).then(function (resp) {
@@ -3372,26 +3435,47 @@ https://www.google.com | Google
             }
             let check = validateBackupObject(backup);
             if (!check.ok) {
+                // 无版本号或大版本不符直接拒绝，确认也无法绕过
                 showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavRestoreFailed")} ${chrome.i18n.getMessage("backupInvalid")}`);
                 return;
             }
-            getShardings(function (items) {
-                // 先存快照，快照存好之后才开始替换，万一恢复错了可以按快照找回（找回方法见 CHECKPOINT 阶段C记录）
-                let snapshot = {
-                    savedAt: new Date().toISOString(),
-                    tabGroups: Array.isArray(items.tabGroups) ? items.tabGroups : [],
-                    delTabGroups: Array.isArray(items.delTabGroups) ? items.delTabGroups : []
-                };
-                chrome.storage.local.set({webdavRestoreSnapshot: snapshot}, function () {
-                    saveShardings(backup.tabGroups, "object");
-                    saveShardings(Array.isArray(backup.delTabGroups) ? backup.delTabGroups : [], "del");
-                    showAlert(`${chrome.i18n.getMessage("webdavTitle")}`, `${chrome.i18n.getMessage("webdavRestoreSuccess")}`);
-                    setTimeout(refresh, 300);
+            // 第 1 次确认：讲清恢复后果和强制备份安排；备份版本比当前插件新时额外警告
+            let msg = `${chrome.i18n.getMessage("webdavRestoreConfirm")}<br>${chrome.i18n.getMessage("webdavRestoreForceNote")}`;
+            if (check.appVersion && njVersionCompare(check.appVersion, chrome.runtime.getManifest().version) > 0) {
+                msg += `<br><strong>${chrome.i18n.getMessage("webdavNewerWarnPrefix")}${check.appVersion}${chrome.i18n.getMessage("webdavNewerWarnSuffix")}</strong>`;
+            }
+            showConfirmation(`${chrome.i18n.getMessage("webdavTitle")}`, msg, function () {
+                // 强制备份：先把当前本地数据作为一个新版本上传成功，才继续
+                getShardings(function (items) {
+                    let current = buildBackupObject(items);
+                    let forceName = njVersionFileName(new Date());
+                    fetch(buildWebDavFileUrl(cfg.webdavUrl, forceName), {
+                        method: "PUT",
+                        credentials: "omit",
+                        headers: {
+                            "Authorization": buildBasicAuthHeader(cfg.webdavUser, cfg.webdavPass),
+                            "Content-Type": "application/json; charset=utf-8"
+                        },
+                        body: JSON.stringify(current)
+                    }).then(function (resp) {
+                        if (!resp.ok) {
+                            throw new Error("HTTP " + resp.status);
+                        }
+                        // 第 2 次确认：输 Y 才真正覆盖本地
+                        showYConfirm(`${chrome.i18n.getMessage("webdavTitle")}`, `${chrome.i18n.getMessage("webdavRestoreConfirm")}`, function () {
+                            saveShardings(backup.tabGroups, "object");
+                            saveShardings(Array.isArray(backup.delTabGroups) ? backup.delTabGroups : [], "del");
+                            chrome.storage.local.remove("webdavRestoreSnapshot");
+                            showAlert(`${chrome.i18n.getMessage("webdavTitle")}`, `${chrome.i18n.getMessage("webdavRestoreSuccess")}`);
+                            setTimeout(refresh, 300);
+                        });
+                    }).catch(function (err) {
+                        showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavForceBackupFailed")}${err.message}`);
+                    });
                 });
             });
         }).catch(function (err) {
             showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavRestoreFailed")} ${err.message}`);
-        });
         });
     }
 

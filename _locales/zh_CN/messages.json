@@ -637,5 +637,17 @@
 	},
 	"webdavVersionTime": {
 		"message": "备份时间"
+	},
+	"webdavRestoreForceNote": {
+		"message": "恢复前会先把当前本地数据作为一个新版本备份到 WebDAV，备份成功后才会继续恢复。"
+	},
+	"webdavForceBackupFailed": {
+		"message": "恢复已中止：恢复前的强制备份失败，本地数据没有改动。原因："
+	},
+	"webdavNewerWarnPrefix": {
+		"message": "注意：这份备份由更新的插件版本生成（版本 "
+	},
+	"webdavNewerWarnSuffix": {
+		"message": "），比当前插件还新，恢复前请确认。"
 	}
 }

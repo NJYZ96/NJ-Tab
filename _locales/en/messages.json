@@ -637,5 +637,17 @@
 	},
 	"webdavVersionTime": {
 		"message": "Backup time"
+	},
+	"webdavRestoreForceNote": {
+		"message": "Before restoring, your current local data will be uploaded to WebDAV as a new backup version. The restore continues only if that backup succeeds."
+	},
+	"webdavForceBackupFailed": {
+		"message": "Restore aborted: the required pre-restore backup failed, so your local data was not changed. Reason: "
+	},
+	"webdavNewerWarnPrefix": {
+		"message": "Warning: this backup was created by a newer plugin version (version "
+	},
+	"webdavNewerWarnSuffix": {
+		"message": "), which is newer than the current plugin. Please confirm carefully before restoring."
 	}
 }
