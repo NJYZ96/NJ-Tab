@@ -1,6 +1,6 @@
 {
     "version": "4.0.0",
-    "name": "N-Tab",
+    "name": "NJ-Tab",
     "manifest_version": 3,
     "description": "__MSG_pluginDesc__",
     "background": {
@@ -29,12 +29,12 @@
     },
     "action": {
         "default_icon": "images/96.png",
-        "default_title": "N-Tab",
+        "default_title": "NJ-Tab",
         "default_popup": "popup.html"
     },
     "web_accessible_resources": [
     ],
-    "homepage_url": "https://github.com/scoful/cloudSkyMonster",
+    "homepage_url": "https://github.com/NJYZ96/NJ-Tab",
     "default_locale": "zh_CN",
     "commands": {
         "toggle-feature-save-all": {

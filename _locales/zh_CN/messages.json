@@ -111,7 +111,7 @@
 		"message": "收起"
 	},
 	"gistFunction": {
-		"message": "同步功能"
+		"message": "备份功能"
 	},
 	"otherFunction": {
 		"message": "其他功能"
@@ -333,7 +333,7 @@
 		"message": "已使用："
 	},
 	"autoSync": {
-		"message": "是否自动同步"
+		"message": "是否自动备份"
 	},
 	"noLog": {
 		"message": "还没有产生日志！"
@@ -417,7 +417,7 @@
 		"message": "组"
 	},
 	"contract": {
-		"message": "有问题可直接联系微信：scoful 请注明来处和来意哦~"
+		"message": "有问题可以在 GitHub 仓库提交 Issue 联系我们"
 	},
 	"cannotDelete": {
 		"message": "锁定状态下不能删除！"
@@ -522,7 +522,7 @@
 		"message": "导入完成，页面将刷新。"
 	},
 	"htmlExportTitle": {
-		"message": "N-Tab 导出的标签"
+		"message": "NJ-Tab 导出的标签"
 	},
 	"htmlExportedAt": {
 		"message": "导出时间"
@@ -534,7 +534,7 @@
 		"message": "已置顶"
 	},
 	"webdavTitle": {
-		"message": "WebDAV 备份（手动同步）"
+		"message": "WebDAV 备份"
 	},
 	"webdavUrl": {
 		"message": "服务器地址"

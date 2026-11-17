@@ -194,7 +194,7 @@
     function buildBackupObject(items, exportedAt) {
         items = items || {};
         return {
-            app: "N-Tab",
+            app: "NJ-Tab",
             formatVersion: 1,
             exportedAt: exportedAt || new Date().toISOString(),
             tabGroups: Array.isArray(items.tabGroups) ? items.tabGroups : [],
@@ -211,7 +211,7 @@
         if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
             return fail("notObject");
         }
-        if (obj.app !== "N-Tab") {
+        if (obj.app !== "NJ-Tab") {
             return fail("appMismatch");
         }
         if (obj.formatVersion !== 1) {
@@ -246,7 +246,7 @@
     // options 里传文案（标题、导出时间标签、锁定/置顶文案），不传时用默认英文，方便单独测试。
     function buildExportHtml(tabGroups, options) {
         options = options || {};
-        let pageTitle = options.title || "N-Tab";
+        let pageTitle = options.title || "NJ-Tab";
         let exportedAtText = options.exportedAtText || "Exported at";
         let exportedAt = options.exportedAt || "";
         let lockedText = options.lockedText || "Locked";
@@ -305,7 +305,7 @@
     // 拼 WebDAV 文件的完整地址：服务器地址末尾斜杠和文件名开头斜杠都先去掉，避免双斜杠；文件名按段做 URL 编码
     function buildWebDavFileUrl(baseUrl, fileName) {
         let base = String(baseUrl || "").trim().replace(/\/+$/, "");
-        let file = String(fileName || "").trim().replace(/^\/+/, "") || "ntab-backup.json";
+        let file = String(fileName || "").trim().replace(/^\/+/, "") || "njtab-backup.json";
         let encodedFile = file.split("/").map(function (seg) {
             return encodeURIComponent(seg);
         }).join("/");
@@ -520,7 +520,7 @@
                         <span class="icon-bar"></span>
                         <span class="icon-bar"></span>
                     </button>
-                    <a class="navbar-brand" href="#home">N-Tab</a>
+                    <a class="navbar-brand" href="#home">NJ-Tab</a>
                 </div>
                 <div id="navbar" class="navbar-collapse collapse">
                     <ul class="nav navbar-nav">
@@ -651,7 +651,7 @@ https://www.google.com | Google
             <hr>
             <div class="blog-footer">
             <p>${chrome.i18n.getMessage("sourceCode")}<a
-                    href="https://github.com/scoful/cloudSkyMonster">GitHub</a>.</p>
+                    href="https://github.com/NJYZ96/NJ-Tab">GitHub</a>.</p>
             <p>${chrome.i18n.getMessage("contract")}</p>
             <hr>
             </div>
@@ -1028,7 +1028,7 @@ https://www.google.com | Google
                     lockedText: `${chrome.i18n.getMessage("htmlLocked")}`,
                     pinnedText: `${chrome.i18n.getMessage("htmlPinned")}`
                 });
-                downloadTextFile("ntab-export-" + formatExportFileDate(now) + ".html", html, "text/html");
+                downloadTextFile("njtab-export-" + formatExportFileDate(now) + ".html", html, "text/html");
             });
         });
 
@@ -1036,7 +1036,7 @@ https://www.google.com | Google
         document.getElementById('exportBackup').addEventListener('click', function () {
             getShardings(function (items) {
                 let backup = buildBackupObject(items);
-                downloadTextFile("ntab-backup-" + formatExportFileDate(new Date()) + ".json", JSON.stringify(backup, null, 2), "application/json");
+                downloadTextFile("njtab-backup-" + formatExportFileDate(new Date()) + ".json", JSON.stringify(backup, null, 2), "application/json");
             });
         });
 
@@ -2986,7 +2986,7 @@ https://www.google.com | Google
             webdavUser: document.getElementById("webdavUser").value.trim(),
             // 密码不 trim：首尾空格也可能是密码的一部分
             webdavPass: document.getElementById("webdavPass").value,
-            webdavFile: document.getElementById("webdavFile").value.trim() || "ntab-backup.json"
+            webdavFile: document.getElementById("webdavFile").value.trim() || "njtab-backup.json"
         };
         chrome.storage.local.set(cfg);
         return cfg;
@@ -3201,7 +3201,7 @@ https://www.google.com | Google
             <div class="form-group row">
               <label for="webdavFile" class="col-sm-2 control-label">${chrome.i18n.getMessage("webdavFile")}:</label>
               <div class="col-sm-5">
-                <input type="text" class="form-control" id="webdavFile" placeholder="ntab-backup.json">
+                <input type="text" class="form-control" id="webdavFile" placeholder="njtab-backup.json">
               </div>
             </div>
             <p>${chrome.i18n.getMessage("webdavPassTip")}</p>
@@ -3232,7 +3232,7 @@ https://www.google.com | Google
             let webdavUrl = document.getElementById("webdavUrl").value.trim()
             let webdavUser = document.getElementById("webdavUser").value.trim()
             let webdavPass = document.getElementById("webdavPass").value
-            let webdavFile = document.getElementById("webdavFile").value.trim() || "ntab-backup.json"
+            let webdavFile = document.getElementById("webdavFile").value.trim() || "njtab-backup.json"
 
             chrome.storage.local.set({
                 options: {

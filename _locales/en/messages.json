@@ -111,7 +111,7 @@
 		"message": "pack up"
 	},
 	"gistFunction": {
-		"message": "Sync"
+		"message": "Backup"
 	},
 	"otherFunction": {
 		"message": "Other"
@@ -327,13 +327,13 @@
 		"message": " second "
 	},
 	"sourceCode": {
-		"message": "The source code for N-Tab is available at "
+		"message": "The source code for NJ-Tab is available at "
 	},
 	"usedSpace": {
 		"message": "UsedSpace : "
 	},
 	"autoSync": {
-		"message": "Open Sync"
+		"message": "Auto backup"
 	},
 	"noLog": {
 		"message": "No log have been saved yet"
@@ -417,7 +417,7 @@
 		"message": " group"
 	},
 	"contract": {
-		"message": "If you have any questions, you can directly contact WeChat : scoful. Please state your source and purpose~"
+		"message": "If you have any questions, please open an issue in the GitHub repository"
 	},
 	"cannotDelete": {
 		"message": "Cannot delete while in locked state."
@@ -522,7 +522,7 @@
 		"message": "Import finished, the page will reload."
 	},
 	"htmlExportTitle": {
-		"message": "Tabs exported from N-Tab"
+		"message": "Tabs exported from NJ-Tab"
 	},
 	"htmlExportedAt": {
 		"message": "Exported at"
@@ -534,7 +534,7 @@
 		"message": "Pinned"
 	},
 	"webdavTitle": {
-		"message": "WebDAV backup (manual sync)"
+		"message": "WebDAV backup"
 	},
 	"webdavUrl": {
 		"message": "Server address"
