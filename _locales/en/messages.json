@@ -619,5 +619,23 @@
 	},
 	"secretSecurityNote": {
 		"message": "Passwords and tokens are stored encrypted on this device only, never in plaintext, and never included in any backup, export or Gist. Note: browser extensions have no system-level vault, so local encryption mainly prevents plaintext exposure and cannot guarantee absolute security."
+	},
+	"webdavAutoBackup": {
+		"message": "WebDAV auto backup"
+	},
+	"webdavIntervalHours": {
+		"message": "Auto backup interval (hours)"
+	},
+	"webdavKeepDays": {
+		"message": "Keep versions from last N days (0 = unlimited)"
+	},
+	"webdavKeepCount": {
+		"message": "Keep last N versions (0 = unlimited)"
+	},
+	"webdavVersionPickTitle": {
+		"message": "Choose a backup version to restore"
+	},
+	"webdavVersionTime": {
+		"message": "Backup time"
 	}
 }

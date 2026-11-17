@@ -79,6 +79,7 @@ chrome.alarms.create("checkAutoSyncGitee", {delayInMinutes: 70, periodInMinutes:
 
 // 创建定时同步github任务，至于是否真的同步，要看设置
 chrome.alarms.create("checkAutoSyncGithub", {delayInMinutes: 90, periodInMinutes: 90});
+chrome.alarms.create("checkWebdavAutoBackup", {delayInMinutes: 60, periodInMinutes: 60});
 
 // 检查是否同步github的gist
 function checkAutoSyncGithub() {
@@ -383,19 +384,31 @@ function isStoredGiteeGistIdLocal(action) {
 }
 
 // 更新github的gist
+// 一次性迁移：先读回这个 Gist 确认旧文件在不在；同一次更新里写新文件、改新描述、删旧文件（先读到旧数据才改名，顺序不能反）
 function updateGithubGist(content) {
     console.log("更新github的gist")
     handleGithubGistLog.push(`${chrome.i18n.getMessage("directUpdate")}`)
     let _content = JSON.stringify(content);
-    let data = {
-        "description": "myCloudSkyMonster", "public": false, "files": {
-            "brower_Tabs.json": {"content": _content}
-        }
-    }
     let myHeaders = new Headers();
     myHeaders.append("Authorization", "token " + githubGistToken)
     myHeaders.append("accept", "application/vnd.github+json")
     myHeaders.append("Content-Type", "application/json");
+    fetch(gitHubApiUrl + "/gists/" + githubGistId, {method: 'GET', headers: myHeaders})
+        .then(response => response.ok ? response.json() : null)
+        .catch(() => null)
+        .then(gistData => {
+            let files = {"NJ-Tab_Tabs.json": {"content": _content}};
+            if (gistData && gistData.files && gistData.files['brower_Tabs.json']) {
+                files['brower_Tabs.json'] = null;
+            }
+            patchGithubGist(files, myHeaders);
+        });
+}
+
+function patchGithubGist(files, myHeaders) {
+    let data = {
+        "description": "NJ-Tab", "public": false, "files": files
+    }
     let requestOptions = {
         method: 'PATCH', headers: myHeaders, body: JSON.stringify(data),
     };
@@ -415,7 +428,6 @@ function updateGithubGist(content) {
             handleGithubGistLog.push(`${chrome.i18n.getMessage("updateFailed")}-->${error.toString()}`)
         })
         .finally(() => {
-            // 请求完成时触发，无论成功还是失败
             console.log('Request completed');
             pushToGithubGistStatus = undefined;
         });
@@ -427,8 +439,8 @@ function updateGiteeGist(content) {
     handleGiteeGistLog.push(`${chrome.i18n.getMessage("directUpdate")}`)
     let _content = JSON.stringify(content);
     let data = {
-        "description": "myCloudSkyMonster", "public": false, "files": {
-            "brower_Tabs.json": {"content": _content}
+        "description": "NJ-Tab", "public": false, "files": {
+            "NJ-Tab_Tabs.json": {"content": _content}
         }
     }
     let myHeaders = new Headers();
@@ -793,6 +805,128 @@ function getShardings(cb) {
     });
 }
 
+// ===== WebDAV 多版本自动备份（阶段4）=====
+// 版本文件名 njtab-backup-YYYYMMDD-HHmmss.json（本地时间）；只认这个命名规则，远端其他文件一律不碰
+function njVersionFileName(d) {
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    return "njtab-backup-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + ".json";
+}
+
+function njVersionTime(name) {
+    let m = /^njtab-backup-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})\.json$/.exec(name || "");
+    if (!m) { return null; }
+    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+}
+
+function njParseVersionNames(text) {
+    let found = {};
+    let re = /njtab-backup-\d{8}-\d{6}\.json/g;
+    let m;
+    while ((m = re.exec(text || "")) !== null) { found[m[0]] = true; }
+    return Object.keys(found).sort().reverse();
+}
+
+// 计算要删的旧版本：保留“最近 keepCount 份”∪“最近 keepDays 天内”∪ 刚上传的那份；两个规则都关（0）时不删任何版本
+function njPickDeletions(names, keepDays, keepCount, protectName, nowMs) {
+    if (!(keepDays > 0) && !(keepCount > 0)) { return []; }
+    let keep = {};
+    if (protectName) { keep[protectName] = true; }
+    names.forEach(function (n, idx) {
+        if (keepCount > 0 && idx < keepCount) { keep[n] = true; }
+        if (keepDays > 0) {
+            let t = njVersionTime(n);
+            if (t !== null && nowMs - t <= keepDays * 86400000) { keep[n] = true; }
+        }
+    });
+    return names.filter(function (n) { return !keep[n]; });
+}
+
+function njWebdavAuthHeader(user, password) {
+    let raw = String(user || "") + ":" + String(password || "");
+    let bytes = new TextEncoder().encode(raw);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return "Basic " + btoa(binary);
+}
+
+function njWebdavFileUrl(baseUrl, fileName) {
+    let base = String(baseUrl || "").trim().replace(/\/+$/, "");
+    let file = String(fileName || "").trim().replace(/^\/+/, "") || "njtab-backup.json";
+    let encodedFile = file.split("/").map(function (seg) {
+        return encodeURIComponent(seg);
+    }).join("/");
+    return base + "/" + encodedFile;
+}
+
+function njCleanupWebdavVersions(cfg, keepDays, keepCount, protectName) {
+    let body = '<?xml version="1.0" encoding="utf-8"?><propfind xmlns="DAV:"><prop><displayname/></prop></propfind>';
+    fetch(cfg.webdavUrl, {
+        method: "PROPFIND",
+        credentials: "omit",
+        headers: {
+            "Authorization": njWebdavAuthHeader(cfg.webdavUser, cfg.webdavPass),
+            "Depth": "1",
+            "Content-Type": "application/xml; charset=utf-8"
+        },
+        body: body
+    }).then(function (resp) {
+        if (!resp.ok) { throw new Error("HTTP " + resp.status); }
+        return resp.text();
+    }).then(function (text) {
+        let dels = njPickDeletions(njParseVersionNames(text), keepDays, keepCount, protectName, Date.now());
+        dels.forEach(function (name) {
+            fetch(njWebdavFileUrl(cfg.webdavUrl, name), {
+                method: "DELETE",
+                credentials: "omit",
+                headers: {"Authorization": njWebdavAuthHeader(cfg.webdavUser, cfg.webdavPass)}
+            }).catch(function () {});
+        });
+    }).catch(function () {});
+}
+
+// 自动备份检查：开关开着、已配置地址、且距上次成功备份超过设定间隔时，把本地数据作为新版本上传；只上传、从不覆盖本地
+function checkWebdavAutoBackup() {
+    chrome.storage.local.get(["webdavUrl", "webdavUser", "webdavAutoBackup", "webdavIntervalHours", "lastWebdavBackupAt", "webdavKeepDays", "webdavKeepCount"], function (st) {
+        if (!st.webdavAutoBackup || !st.webdavUrl) { return; }
+        let intervalMs = (parseFloat(st.webdavIntervalHours) || 24) * 3600000;
+        if (Date.now() - (st.lastWebdavBackupAt || 0) < intervalMs) { return; }
+        njLoadSecretField("webdavPass", function (pass) {
+            getShardings(function (items) {
+                let backup = {
+                    app: "NJ-Tab",
+                    formatVersion: 1,
+                    appVersion: chrome.runtime.getManifest().version,
+                    exportedAt: new Date().toISOString(),
+                    tabGroups: Array.isArray(items.tabGroups) ? items.tabGroups : [],
+                    delTabGroups: Array.isArray(items.delTabGroups) ? items.delTabGroups : []
+                };
+                let fileName = njVersionFileName(new Date());
+                fetch(njWebdavFileUrl(st.webdavUrl, fileName), {
+                    method: "PUT",
+                    credentials: "omit",
+                    headers: {
+                        "Authorization": njWebdavAuthHeader(st.webdavUser || "", pass || ""),
+                        "Content-Type": "application/json; charset=utf-8"
+                    },
+                    body: JSON.stringify(backup)
+                }).then(function (resp) {
+                    if (!resp.ok) { throw new Error("HTTP " + resp.status); }
+                    chrome.storage.local.set({lastWebdavBackupAt: Date.now()});
+                    njCleanupWebdavVersions(
+                        {webdavUrl: st.webdavUrl, webdavUser: st.webdavUser || "", webdavPass: pass || ""},
+                        st.webdavKeepDays === undefined ? 30 : st.webdavKeepDays,
+                        st.webdavKeepCount === undefined ? 10 : st.webdavKeepCount,
+                        fileName);
+                }).catch(function (err) {
+                    console.log("WebDAV 自动备份失败", err);
+                });
+            });
+        });
+    });
+}
+
 // 持续监听，假如锁屏或者睡眠就清空定时任务，激活再重新定时任务
 chrome.idle.onStateChanged.addListener(function (newState) {
     console.log(newState)
@@ -800,6 +934,7 @@ chrome.idle.onStateChanged.addListener(function (newState) {
         if (isLock) {
             chrome.alarms.create("checkAutoSyncGitee", {delayInMinutes: 70, periodInMinutes: 70});
             chrome.alarms.create("checkAutoSyncGithub", {delayInMinutes: 90, periodInMinutes: 90});
+chrome.alarms.create("checkWebdavAutoBackup", {delayInMinutes: 60, periodInMinutes: 60});
             isLock = false;
         }
     }
@@ -823,6 +958,9 @@ chrome.alarms.onAlarm.addListener(function (alarm) {
     if (alarm.name === "checkAutoSyncGithub") {
         console.log("自动同步github")
         checkAutoSyncGithub();
+    }
+    if (alarm.name === "checkWebdavAutoBackup") {
+        checkWebdavAutoBackup();
     }
     if (alarm.name === "inTimeSync") {
         // console.log("实时同步触发")

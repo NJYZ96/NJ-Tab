@@ -619,5 +619,23 @@
 	},
 	"secretSecurityNote": {
 		"message": "密码与令牌只在本机加密保存，不会明文存放，也不会进入任何备份、导出或 Gist。提醒：浏览器插件没有系统级保险箱，本机加密主要防止明文被直接看到或抄走，不能保证绝对安全。"
+	},
+	"webdavAutoBackup": {
+		"message": "WebDAV 自动备份"
+	},
+	"webdavIntervalHours": {
+		"message": "自动备份间隔（小时）"
+	},
+	"webdavKeepDays": {
+		"message": "保留最近天数（0=不限）"
+	},
+	"webdavKeepCount": {
+		"message": "保留最近份数（0=不限）"
+	},
+	"webdavVersionPickTitle": {
+		"message": "选择要恢复的备份版本"
+	},
+	"webdavVersionTime": {
+		"message": "备份时间"
 	}
 }
