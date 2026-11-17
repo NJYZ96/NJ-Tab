@@ -1109,8 +1109,7 @@ https://www.google.com | Google
 
         // 响应推送到github的gist的动作
         document.getElementById('pushToGithubGist').addEventListener('click', function () {
-            let confirm = prompt(`${chrome.i18n.getMessage("confirmKey")}`, `${chrome.i18n.getMessage("confirmValue")}`);
-            if (confirm.trim() === "确定" || confirm.trim() === "confirm") {
+            showDoubleConfirmation(`${chrome.i18n.getMessage("pushToGithubGist")}`, `${chrome.i18n.getMessage("gistPushOverwriteWarn")}`, function () {
                 console.log("yes");
                 chrome.storage.local.get(null, function (storage) {
                     if (!storage.githubGistToken) {
@@ -1138,16 +1137,12 @@ https://www.google.com | Google
                         pushToGithubGist();
                     }
                 });
-            } else {
-                console.log("no");
-                showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("importTextareaTip")}`)
-            }
+            });
         });
 
         // 响应推送到gitee的gist的动作
         document.getElementById('pushToGiteeGist').addEventListener('click', function () {
-            let confirm = prompt(`${chrome.i18n.getMessage("confirmKey")}`, `${chrome.i18n.getMessage("confirmValue")}`);
-            if (confirm.trim() === "确定" || confirm.trim() === "confirm") {
+            showDoubleConfirmation(`${chrome.i18n.getMessage("pushToGiteeGist")}`, `${chrome.i18n.getMessage("gistPushOverwriteWarn")}`, function () {
                 console.log("yes");
                 chrome.storage.local.get(null, function (storage) {
                     if (!storage.giteeGistToken) {
@@ -1175,16 +1170,12 @@ https://www.google.com | Google
                         pushToGiteeGist();
                     }
                 });
-            } else {
-                console.log("no");
-                showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("importTextareaTip")}`)
-            }
+            });
         });
 
         // 响应从github的gist拉取的动作
         document.getElementById('pullFromGithubGist').addEventListener('click', function () {
-            let confirm = prompt(`${chrome.i18n.getMessage("confirmKey")}`, `${chrome.i18n.getMessage("confirmValue")}`);
-            if (confirm.trim() === "确定" || confirm.trim() === "confirm") {
+            showDoubleConfirmation(`${chrome.i18n.getMessage("pullFromGithubGist")}`, `${chrome.i18n.getMessage("gistPullOverwriteWarn")}`, function () {
                 console.log("yes");
                 chrome.storage.local.get(null, function (storage) {
                     if (!storage.githubGistToken) {
@@ -1212,16 +1203,12 @@ https://www.google.com | Google
                         pullFromGithubGist();
                     }
                 });
-            } else {
-                console.log("no");
-                showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("importTextareaTip")}`)
-            }
+            });
         });
 
         // 响应从gitee的gist拉取的动作
         document.getElementById('pullFromGiteeGist').addEventListener('click', function () {
-            let confirm = prompt(`${chrome.i18n.getMessage("confirmKey")}`, `${chrome.i18n.getMessage("confirmValue")}`);
-            if (confirm.trim() === "确定" || confirm.trim() === "confirm") {
+            showDoubleConfirmation(`${chrome.i18n.getMessage("pullFromGiteeGist")}`, `${chrome.i18n.getMessage("gistPullOverwriteWarn")}`, function () {
                 console.log("yes");
                 chrome.storage.local.get(null, function (storage) {
                     if (!storage.giteeGistToken) {
@@ -1249,10 +1236,7 @@ https://www.google.com | Google
                         pullFromGiteeGist();
                     }
                 });
-            } else {
-                console.log("no");
-                showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("importTextareaTip")}`)
-            }
+            });
         });
 
         // 持续监听通知框的按钮点击事件，点了就清除通知框
@@ -2997,7 +2981,7 @@ https://www.google.com | Google
     function uploadBackupToWebDav() {
         let cfg = readWebDavConfig();
         if (!cfg || !cfg.webdavUrl) {
-            alert(`${chrome.i18n.getMessage("webdavConfigMissing")}`);
+            showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavConfigMissing")}`);
             return;
         }
         getShardings(function (items) {
@@ -3031,12 +3015,10 @@ https://www.google.com | Google
     function restoreBackupFromWebDav() {
         let cfg = readWebDavConfig();
         if (!cfg || !cfg.webdavUrl) {
-            alert(`${chrome.i18n.getMessage("webdavConfigMissing")}`);
+            showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavConfigMissing")}`);
             return;
         }
-        if (!confirm(`${chrome.i18n.getMessage("webdavRestoreConfirm")}`)) {
-            return;
-        }
+        showDoubleConfirmation(`${chrome.i18n.getMessage("webdavTitle")}`, `${chrome.i18n.getMessage("webdavRestoreConfirm")}`, function () {
         fetch(buildWebDavFileUrl(cfg.webdavUrl, cfg.webdavFile), {
             method: "GET",
             // 同上传：认证只走 Authorization 头，避免 401 时被浏览器认证框挂起（见 uploadBackupToWebDav 注释）
@@ -3052,12 +3034,12 @@ https://www.google.com | Google
             try {
                 backup = JSON.parse(text);
             } catch (e) {
-                alert(`${chrome.i18n.getMessage("webdavRestoreFailed")} ${chrome.i18n.getMessage("backupInvalid")}`);
+                showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavRestoreFailed")} ${chrome.i18n.getMessage("backupInvalid")}`);
                 return;
             }
             let check = validateBackupObject(backup);
             if (!check.ok) {
-                alert(`${chrome.i18n.getMessage("webdavRestoreFailed")} ${chrome.i18n.getMessage("backupInvalid")}`);
+                showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavRestoreFailed")} ${chrome.i18n.getMessage("backupInvalid")}`);
                 return;
             }
             getShardings(function (items) {
@@ -3070,12 +3052,13 @@ https://www.google.com | Google
                 chrome.storage.local.set({webdavRestoreSnapshot: snapshot}, function () {
                     saveShardings(backup.tabGroups, "object");
                     saveShardings(Array.isArray(backup.delTabGroups) ? backup.delTabGroups : [], "del");
-                    alert(`${chrome.i18n.getMessage("webdavRestoreSuccess")}`);
+                    showAlert(`${chrome.i18n.getMessage("webdavTitle")}`, `${chrome.i18n.getMessage("webdavRestoreSuccess")}`);
                     setTimeout(refresh, 300);
                 });
             });
         }).catch(function (err) {
-            alert(`${chrome.i18n.getMessage("webdavRestoreFailed")} ${err.message}`);
+            showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavRestoreFailed")} ${err.message}`);
+        });
         });
     }
 
@@ -3344,6 +3327,66 @@ https://www.google.com | Google
         $('#confirmationModal').modal('show');
 
         $('#confirmButton').on('click', function () {
+            $('#confirmationModal').modal('hide');
+            onConfirm();
+        });
+    }
+
+    // 覆盖类操作的 2 次确认弹窗：第 1 次普通确认讲清后果；第 2 次必须输入单个字母 Y，确认按钮才可用
+    function showDoubleConfirmation(title, message, onConfirm) {
+        let modalHtml = `
+        <div class="modal fade" id="confirmationModal" tabindex="-1" role="dialog" aria-labelledby="confirmationModalLabel" aria-hidden="true">
+          <div class="modal-dialog" role="document">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title" id="confirmationModalLabel">${title}</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                  <span aria-hidden="true">&times;</span>
+                </button>
+              </div>
+              <div class="modal-body">
+                <div id="njConfirmStep1">${message}</div>
+                <div id="njConfirmStep2" style="display:none">
+                  <p>${chrome.i18n.getMessage("njTypeYHint")}</p>
+                  <input type="text" class="form-control" id="njConfirmYInput" maxlength="1" autocomplete="off" placeholder="Y">
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">${chrome.i18n.getMessage("njCancel")}</button>
+                <button type="button" class="btn btn-primary" id="njConfirmNextBtn">${chrome.i18n.getMessage("njContinue")}</button>
+                <button type="button" class="btn btn-danger" id="njConfirmExecBtn" style="display:none" disabled>${chrome.i18n.getMessage("njExecute")}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+            `;
+
+        let modalContainer = document.createElement('div');
+        modalContainer.innerHTML = modalHtml;
+        document.body.appendChild(modalContainer);
+
+        $('#confirmationModal').modal('show');
+
+        $('#njConfirmNextBtn').on('click', function () {
+            $('#njConfirmStep1').hide();
+            $('#njConfirmNextBtn').hide();
+            $('#njConfirmStep2').show();
+            $('#njConfirmExecBtn').show();
+            $('#njConfirmYInput').focus();
+        });
+
+        $('#njConfirmYInput').on('input', function () {
+            let ok = $(this).val().trim().toUpperCase() === 'Y';
+            $('#njConfirmExecBtn').prop('disabled', !ok);
+        });
+
+        $('#njConfirmYInput').on('keydown', function (e) {
+            if (e.key === 'Enter' && !$('#njConfirmExecBtn').prop('disabled')) {
+                $('#njConfirmExecBtn').click();
+            }
+        });
+
+        $('#njConfirmExecBtn').on('click', function () {
             $('#confirmationModal').modal('hide');
             onConfirm();
         });

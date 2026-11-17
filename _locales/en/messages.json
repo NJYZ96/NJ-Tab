@@ -592,5 +592,23 @@
 	},
 	"restoreDiscardedEnable": {
 		"message": "Enable"
+	},
+	"njCancel": {
+		"message": "Cancel"
+	},
+	"njContinue": {
+		"message": "Continue"
+	},
+	"njExecute": {
+		"message": "Confirm"
+	},
+	"njTypeYHint": {
+		"message": "Final confirmation: type the letter Y to enable the confirm button."
+	},
+	"gistPushOverwriteWarn": {
+		"message": "Pushing will overwrite the backup in the remote Gist with all your local data. The current remote backup will be replaced. Continue?"
+	},
+	"gistPullOverwriteWarn": {
+		"message": "Pulling will overwrite all local tabs and recycle bin contents with the backup in the remote Gist. Your current local data will be replaced. Continue?"
 	}
 }
