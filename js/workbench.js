@@ -26,6 +26,471 @@
     // 定义2种已使用状态标识变量
     let isStateOne = true;
 
+    // ===== 主题（阶段B：暗黑模式） =====
+    // themeMode 三档：light（浅色）/ dark（深色）/ auto（跟随系统，默认）
+    let themeMode = "auto";
+    let darkMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+    // 由 themeMode 和系统是否深色算出实际主题（纯函数，方便单独测试）
+    function resolveTheme(mode, systemDark) {
+        if (mode === "light" || mode === "dark") {
+            return mode;
+        }
+        return systemDark ? "dark" : "light";
+    }
+
+    function themeModeText(mode) {
+        if (mode === "light") {
+            return chrome.i18n.getMessage("themeLight");
+        }
+        if (mode === "dark") {
+            return chrome.i18n.getMessage("themeDark");
+        }
+        return chrome.i18n.getMessage("themeAuto");
+    }
+
+    // 应用主题：给 <html> 设置 data-theme（css/workbench.css 靠它切换变量），
+    // 同步 localStorage 镜像 themeModeMirror（供 workbench.html 内联脚本下次打开时尽早读到，减少闪白），
+    // 并更新导航菜单上显示的当前档位文案
+    function applyTheme(mode) {
+        themeMode = (mode === "light" || mode === "dark") ? mode : "auto";
+        document.documentElement.setAttribute("data-theme", resolveTheme(themeMode, darkMediaQuery.matches));
+        try {
+            localStorage.setItem("themeModeMirror", themeMode);
+        } catch (e) {
+        }
+        let label = document.getElementById("themeModeLabel");
+        if (label) {
+            label.textContent = themeModeText(themeMode);
+        }
+    }
+
+    // 用户在菜单里选了某一档：应用 + 存 chrome.storage.local（正式设置，键 themeMode）
+    function setThemeMode(mode) {
+        applyTheme(mode);
+        chrome.storage.local.set({"themeMode": themeMode});
+    }
+
+    // auto 档下，系统深/浅色变化时实时跟着变
+    function onSystemThemeChange() {
+        if (themeMode === "auto") {
+            applyTheme("auto");
+        }
+    }
+
+    if (darkMediaQuery.addEventListener) {
+        darkMediaQuery.addEventListener("change", onSystemThemeChange);
+    } else if (darkMediaQuery.addListener) {
+        darkMediaQuery.addListener(onSystemThemeChange);
+    }
+
+    // ===== 拖拽后 DOM 同步（阶段B：拖拽流畅度） =====
+    // Sortable 在 onEnd 时已经把 DOM 节点移到了正确位置，所以 onEnd 只更新数据并保存、不再全量重渲染。
+    // 但有两类按渲染序号写死的信息，拖完必须同步，否则后续操作会找错组/删错标签：
+    // 1) 组容器的 id、组内 ul 的 id、组名 span/input 的 id —— moveTab 靠 evt.from/to.parentNode.id（组容器 id）判断来源/目标组；
+    // 2) 组内标签数文案（跨组拖标签后出组 -1、入组 +1）。
+    // 另外，视图事件处理里闭包捕获的序号 i/ii 在拖动后会过期，改为点击时按元素当前 DOM 位置现算
+    // （见 currentGroupIndex/currentTabIndex 以及各处理函数里的 ci/cii）。
+    // containerId：组列表容器 id（普通列表 tabGroups / 回收站 tabGroupsBak）
+    // prefix：组内元素 id 前缀（普通列表 "" / 回收站 "del_"），ul 的 id 形如 prefix + "tabs_" + 序号
+    function syncDragDomOrder(containerId, prefix) {
+        let container = document.getElementById(containerId);
+        if (!container) {
+            return;
+        }
+        let groups = container.querySelectorAll(":scope > div.tabs");
+        for (let k = 0; k < groups.length; k += 1) {
+            let g = groups[k];
+            g.id = k;
+            let ul = g.querySelector("ul");
+            if (ul) {
+                ul.id = prefix + "tabs_" + k;
+            }
+            let nameSpan = g.querySelector(".group-name");
+            if (nameSpan) {
+                nameSpan.id = prefix + "groupTitle" + k;
+            }
+            let nameInput = g.querySelector(".group-title-input");
+            if (nameInput) {
+                nameInput.id = prefix + "groupTitleInput" + k;
+            }
+            // 备注的展示/编辑元素 id 同样写死了序号，一并重编号（回收站没有备注元素，查不到就跳过）
+            let noteSpan = g.querySelector(".group-note");
+            if (noteSpan) {
+                noteSpan.id = prefix + "groupNote" + k;
+            }
+            let noteInput = g.querySelector(".group-note-input");
+            if (noteInput) {
+                noteInput.id = prefix + "groupNoteInput" + k;
+            }
+            let amount = g.querySelector(".group-amount");
+            if (amount && ul) {
+                amount.textContent = ul.children.length + chrome.i18n.getMessage("tabsNo");
+            }
+        }
+    }
+
+    // 点击时现算组序号：从被点击元素向上找到组容器（其父节点即组列表容器），返回它在同级组中的位置；找不到时回退到闭包旧序号
+    function currentGroupIndex(el, fallback) {
+        let node = el;
+        while (node && node.parentNode && node.parentNode.id !== "tabGroups" && node.parentNode.id !== "tabGroupsBak") {
+            node = node.parentNode;
+        }
+        if (!node || !node.parentNode) {
+            return fallback;
+        }
+        let groups = node.parentNode.querySelectorAll(":scope > div.tabs");
+        for (let k = 0; k < groups.length; k += 1) {
+            if (groups[k] === node) {
+                return k;
+            }
+        }
+        return fallback;
+    }
+
+    // 点击时现算标签序号：被点击元素所在的 li 在其 ul 中的位置；找不到时回退到闭包旧序号
+    function currentTabIndex(el, fallback) {
+        let li = el;
+        while (li && li.tagName !== "LI") {
+            li = li.parentNode;
+        }
+        if (!li || !li.parentNode) {
+            return fallback;
+        }
+        let items = li.parentNode.children;
+        for (let k = 0; k < items.length; k += 1) {
+            if (items[k] === li) {
+                return k;
+            }
+        }
+        return fallback;
+    }
+
+    // ===== 阶段C：单文件导出 / 完整备份导入 / WebDAV =====
+    // 下面几个是尽量不依赖 DOM 和 chrome 的纯函数，方便用 Node 单独测试：
+    // escapeHtml（HTML 转义）、isSafeExportUrl（导出链接协议白名单）、
+    // buildBackupObject（构建完整备份对象）、validateBackupObject（校验备份对象）、
+    // buildExportHtml（构建导出网页文件的内容）、buildWebDavFileUrl / buildBasicAuthHeader（WebDAV 辅助）。
+
+    // HTML 转义：标签标题、组名等都是用户数据，直接拼进导出文件会变成 XSS 载体，必须先转义
+    function escapeHtml(text) {
+        if (text === null || typeof text === "undefined") {
+            return "";
+        }
+        return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+
+    // 只有这几种协议的网址才能在导出文件里做成可点链接，其余（如 javascript:、data:）只显示为纯文本
+    function isSafeExportUrl(url) {
+        if (typeof url !== "string") {
+            return false;
+        }
+        return /^(https?|ftp|file):/i.test(url.trim());
+    }
+
+    // 构建完整备份对象：tabGroups / delTabGroups 原样放入，一个字段都不改，
+    // 保证 date、id、isLock、isPined、groupTitle、deletedAt 无损往返
+    function buildBackupObject(items, exportedAt) {
+        items = items || {};
+        return {
+            app: "N-Tab",
+            formatVersion: 1,
+            exportedAt: exportedAt || new Date().toISOString(),
+            tabGroups: Array.isArray(items.tabGroups) ? items.tabGroups : [],
+            delTabGroups: Array.isArray(items.delTabGroups) ? items.delTabGroups : []
+        };
+    }
+
+    // 严格校验备份对象：不合格返回 {ok:false, error:原因}，调用方据此报错且不写任何数据
+    function validateBackupObject(obj) {
+        function fail(reason) {
+            return {ok: false, error: reason};
+        }
+
+        if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+            return fail("notObject");
+        }
+        if (obj.app !== "N-Tab") {
+            return fail("appMismatch");
+        }
+        if (obj.formatVersion !== 1) {
+            return fail("versionMismatch");
+        }
+        if (!Array.isArray(obj.tabGroups)) {
+            return fail("tabGroupsNotArray");
+        }
+        if (typeof obj.delTabGroups !== "undefined" && !Array.isArray(obj.delTabGroups)) {
+            return fail("delTabGroupsNotArray");
+        }
+        let allGroups = obj.tabGroups.concat(Array.isArray(obj.delTabGroups) ? obj.delTabGroups : []);
+        for (let i = 0; i < allGroups.length; i++) {
+            let group = allGroups[i];
+            if (!group || typeof group !== "object" || Array.isArray(group)) {
+                return fail("groupNotObject");
+            }
+            if (!Array.isArray(group.tabs)) {
+                return fail("tabsNotArray");
+            }
+            for (let j = 0; j < group.tabs.length; j++) {
+                let tab = group.tabs[j];
+                if (!tab || typeof tab !== "object" || typeof tab.url !== "string" || tab.url.length === 0) {
+                    return fail("tabUrlMissing");
+                }
+            }
+        }
+        return {ok: true, error: ""};
+    }
+
+    // 构建导出网页文件（单个 .html）的全部内容。
+    // options 里传文案（标题、导出时间标签、锁定/置顶文案），不传时用默认英文，方便单独测试。
+    function buildExportHtml(tabGroups, options) {
+        options = options || {};
+        let pageTitle = options.title || "N-Tab";
+        let exportedAtText = options.exportedAtText || "Exported at";
+        let exportedAt = options.exportedAt || "";
+        let lockedText = options.lockedText || "Locked";
+        let pinnedText = options.pinnedText || "Pinned";
+        let groups = Array.isArray(tabGroups) ? tabGroups : [];
+        let parts = [];
+        parts.push("<!DOCTYPE html>");
+        parts.push("<html><head><meta charset=\"utf-8\">");
+        parts.push("<title>" + escapeHtml(pageTitle) + "</title>");
+        parts.push("<style>body{font-family:-apple-system,'Segoe UI',Arial,sans-serif;margin:2em auto;max-width:960px;padding:0 1em;line-height:1.7;color:#222;background:#fff}a{color:#234da7;text-decoration:none}a:hover{text-decoration:underline}.meta{color:#888;font-size:.9em}h2{margin-top:1.4em;border-bottom:1px solid #ddd;padding-bottom:.2em}@media (prefers-color-scheme: dark){body{background:#1e1e1e;color:#ddd}a{color:#7aa5ff}h2{border-bottom-color:#444}}</style>");
+        parts.push("</head><body>");
+        parts.push("<h1>" + escapeHtml(pageTitle) + "</h1>");
+        if (exportedAt) {
+            parts.push("<p class=\"meta\">" + escapeHtml(exportedAtText) + ": " + escapeHtml(exportedAt) + "</p>");
+        }
+        for (let i = 0; i < groups.length; i++) {
+            let group = groups[i] || {};
+            let groupTitle = (typeof group.groupTitle === "string" && group.groupTitle !== "undefined") ? group.groupTitle : "";
+            let heading = groupTitle || group.date || "";
+            parts.push("<h2>" + escapeHtml(heading) + "</h2>");
+            let marks = [];
+            if (group.date) {
+                marks.push(escapeHtml(group.date));
+            }
+            if (group.isLock) {
+                marks.push(escapeHtml(lockedText));
+            }
+            if (group.isPined) {
+                marks.push(escapeHtml(pinnedText));
+            }
+            if (marks.length > 0) {
+                parts.push("<p class=\"meta\">" + marks.join(" · ") + "</p>");
+            }
+            parts.push("<ul>");
+            let tabs = Array.isArray(group.tabs) ? group.tabs : [];
+            for (let j = 0; j < tabs.length; j++) {
+                let tab = tabs[j] || {};
+                let tabTitle = (typeof tab.title === "string" && tab.title.trim()) ? tab.title : tab.url;
+                if (isSafeExportUrl(tab.url)) {
+                    parts.push("<li><a href=\"" + escapeHtml(tab.url.trim()) + "\" target=\"_blank\" rel=\"noopener noreferrer\">" + escapeHtml(tabTitle) + "</a></li>");
+                } else {
+                    // 危险/未知协议：标题和网址都只显示为纯文本，绝不进 href
+                    let line = escapeHtml(tabTitle);
+                    if (tab.url && tab.url !== tabTitle) {
+                        line += " (" + escapeHtml(tab.url) + ")";
+                    }
+                    parts.push("<li>" + line + "</li>");
+                }
+            }
+            parts.push("</ul>");
+        }
+        parts.push("</body></html>");
+        return parts.join("\n");
+    }
+
+    // 拼 WebDAV 文件的完整地址：服务器地址末尾斜杠和文件名开头斜杠都先去掉，避免双斜杠；文件名按段做 URL 编码
+    function buildWebDavFileUrl(baseUrl, fileName) {
+        let base = String(baseUrl || "").trim().replace(/\/+$/, "");
+        let file = String(fileName || "").trim().replace(/^\/+/, "") || "ntab-backup.json";
+        let encodedFile = file.split("/").map(function (seg) {
+            return encodeURIComponent(seg);
+        }).join("/");
+        return base + "/" + encodedFile;
+    }
+
+    // 生成 HTTP Basic 认证头。密码可能含中文等非 ASCII 字符，不能直接 btoa（会抛错或乱码）：
+    // 先用 TextEncoder 把 "账号:密码" 编成 UTF-8 字节，再逐字节转成二进制字符串后 btoa；没有 TextEncoder 时用 encodeURIComponent+unescape 兜底，效果相同。
+    function buildBasicAuthHeader(user, password) {
+        let raw = String(user || "") + ":" + String(password || "");
+        let binary;
+        if (typeof TextEncoder !== "undefined") {
+            let bytes = new TextEncoder().encode(raw);
+            binary = "";
+            for (let i = 0; i < bytes.length; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+        } else {
+            binary = unescape(encodeURIComponent(raw));
+        }
+        return "Basic " + btoa(binary);
+    }
+
+    // ===== 阶段D：全局搜索 / 标签组备注 / 恢复时休眠打开 =====
+    // 全局搜索（纯函数，可单测）：给定标签组数组和关键词，返回命中的组与标签。
+    // 匹配规则（不区分大小写）：
+    // - 组名命中 → 该组全部标签计入结果；
+    // - 否则，标签标题或网址命中 → 该标签计入结果。
+    // 返回 {groups: [{groupTitle, date, note, tabs: [{title, url}]}], groupCount, tabCount}；
+    // 关键词为空（或只有空白）时返回空结果。结果只用于只读展示，里面的序号不参与任何数据操作。
+    function searchTabGroups(tabGroups, keyword) {
+        let result = {groups: [], groupCount: 0, tabCount: 0};
+        let kw = (keyword === null || typeof keyword === "undefined") ? "" : String(keyword).trim().toLowerCase();
+        if (!kw || !Array.isArray(tabGroups)) {
+            return result;
+        }
+        for (let i = 0; i < tabGroups.length; i++) {
+            let group = tabGroups[i] || {};
+            // groupTitle 的历史怪值 "undefined"（字符串）按空处理，与导出代码保持一致
+            let groupTitle = (typeof group.groupTitle === "string" && group.groupTitle !== "undefined") ? group.groupTitle : "";
+            let tabs = Array.isArray(group.tabs) ? group.tabs : [];
+            let matchedTabs;
+            if (groupTitle.toLowerCase().indexOf(kw) !== -1) {
+                // 组名命中：整组标签都算命中
+                matchedTabs = tabs.slice();
+            } else {
+                matchedTabs = tabs.filter(function (tab) {
+                    if (!tab) {
+                        return false;
+                    }
+                    let titleHit = typeof tab.title === "string" && tab.title.toLowerCase().indexOf(kw) !== -1;
+                    let urlHit = typeof tab.url === "string" && tab.url.toLowerCase().indexOf(kw) !== -1;
+                    return titleHit || urlHit;
+                });
+            }
+            if (matchedTabs.length > 0) {
+                result.groups.push({
+                    groupTitle: groupTitle,
+                    date: group.date || "",
+                    note: (typeof group.note === "string") ? group.note : "",
+                    tabs: matchedTabs
+                });
+                result.groupCount += 1;
+                result.tabCount += matchedTabs.length;
+            }
+        }
+        return result;
+    }
+
+    // 批量恢复时打开一个标签：
+    // useDiscarded 为 false 时与原行为完全一致（chrome.tabs.create({url})）；
+    // 为 true 时先以未激活方式打开，再立刻 discard 成休眠状态（点开才真正加载，省内存），
+    // discard 失败只吞掉错误，不影响其他标签继续打开。
+    function openRestoredTab(url, useDiscarded) {
+        if (!useDiscarded) {
+            chrome.tabs.create({
+                url: url
+            });
+            return;
+        }
+        chrome.tabs.create({
+            url: url, active: false
+        }, function (tab) {
+            if (tab && tab.id) {
+                chrome.tabs.discard(tab.id, function () {
+                    void chrome.runtime.lastError;
+                });
+            }
+        });
+    }
+
+    // 渲染搜索结果到独立的只读结果区 #searchResults（阶段D，全局搜索）。
+    // 安全设计：结果区只展示组名/日期/备注和标签链接，点击标签只打开它，
+    // 不放任何删除/拖拽/改名按钮——过滤后的序号永远不会被拿去操作数据，杜绝删错。
+    // 所有文字都用 textContent 写入（等价于 mithril 文本节点），不存在 HTML 注入。
+    // 关键词为空时隐藏结果区并恢复原列表；有关键词时隐藏原列表、只显示结果区。
+    function renderSearchResults() {
+        let input = document.getElementById("searchInput");
+        let resultsEl = document.getElementById("searchResults");
+        let listEl = document.getElementById("tabGroups");
+        if (!input || !resultsEl || !listEl) {
+            return;
+        }
+        let keyword = input.value.trim();
+        if (!keyword) {
+            resultsEl.classList.add("hide");
+            resultsEl.innerHTML = "";
+            listEl.classList.remove("hide");
+            return;
+        }
+        // 数据来源用现成的分片读取逻辑 getShardings，不改存储
+        getShardings(function (items) {
+            // 异步读数据期间用户可能又改了关键词，以输入框的当前值为准，旧结果直接丢弃
+            let currentKeyword = input.value.trim();
+            if (!currentKeyword || currentKeyword !== keyword) {
+                return;
+            }
+            let res = searchTabGroups(items ? items.tabGroups : [], currentKeyword);
+            resultsEl.innerHTML = "";
+            let countEl = document.createElement("div");
+            countEl.className = "search-result-count";
+            countEl.textContent = chrome.i18n.getMessage("searchResults") + res.groupCount + chrome.i18n.getMessage("group") + " / " + res.tabCount + chrome.i18n.getMessage("tabsNo");
+            resultsEl.appendChild(countEl);
+            if (res.groupCount === 0) {
+                let emptyEl = document.createElement("div");
+                emptyEl.className = "search-no-results";
+                emptyEl.textContent = chrome.i18n.getMessage("searchNoResults");
+                resultsEl.appendChild(emptyEl);
+            }
+            res.groups.forEach(function (group) {
+                let groupEl = document.createElement("div");
+                groupEl.className = "search-result-group";
+                let titleEl = document.createElement("div");
+                let nameEl = document.createElement("span");
+                nameEl.className = "group-name";
+                nameEl.textContent = group.groupTitle || group.date || "";
+                titleEl.appendChild(nameEl);
+                if (group.groupTitle && group.date) {
+                    let dateEl = document.createElement("span");
+                    dateEl.className = "group-date";
+                    dateEl.textContent = " " + group.date;
+                    titleEl.appendChild(dateEl);
+                }
+                groupEl.appendChild(titleEl);
+                if (group.note) {
+                    let noteEl = document.createElement("div");
+                    noteEl.className = "group-note";
+                    noteEl.textContent = group.note;
+                    groupEl.appendChild(noteEl);
+                }
+                let ulEl = document.createElement("ul");
+                group.tabs.forEach(function (tab) {
+                    let liEl = document.createElement("li");
+                    liEl.className = "li-hover li-standard";
+                    let linkEl = document.createElement("span");
+                    linkEl.className = "link";
+                    linkEl.title = (tab.title || "") + "\n" + (tab.url || "");
+                    linkEl.textContent = tab.title || tab.url || "";
+                    linkEl.addEventListener("click", function () {
+                        // 只打开这个标签，不做任何删除/移动（与主列表单个标签的打开方式一致：未激活打开）
+                        chrome.tabs.create({
+                            url: tab.url, active: false
+                        });
+                    });
+                    liEl.appendChild(linkEl);
+                    ulEl.appendChild(liEl);
+                });
+                groupEl.appendChild(ulEl);
+                resultsEl.appendChild(groupEl);
+            });
+            listEl.classList.add("hide");
+            resultsEl.classList.remove("hide");
+        });
+    }
+
+    // 导出文件名里的日期，如 20261117
+    function formatExportFileDate(date) {
+        date = date || new Date();
+        function pad(n) {
+            return (n < 10 ? "0" : "") + n;
+        }
+
+        return "" + date.getFullYear() + pad(date.getMonth() + 1) + pad(date.getDate());
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
         console.log("load完workbench了");
 
@@ -97,7 +562,15 @@
                                 <li><a href="#">${chrome.i18n.getMessage("dragTitle")} <input id="dragTitle" data-size="mini" type="checkbox"></a></li>
                                 <li><a href="#">${chrome.i18n.getMessage("dragTabs")} <input id="dragUrls" data-size="mini" type="checkbox"></a></li>
                                 <li role="separator" class="divider"></li>
-                                <li><a href="#">${chrome.i18n.getMessage("dragOpenTranslate")} <input id="dragOpenTranslate" data-size="mini" type="checkbox"></a></li>
+                            </ul>
+                        </li>
+                        <li class="dropdown">
+                            <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button"
+                                aria-haspopup="true" aria-expanded="false">${chrome.i18n.getMessage("themeMode")}：<span id="themeModeLabel"></span><span class="caret"></span></a>
+                            <ul class="dropdown-menu">
+                                <li id="themeLight"><a href="#">${chrome.i18n.getMessage("themeLight")}</a></li>
+                                <li id="themeDark"><a href="#">${chrome.i18n.getMessage("themeDark")}</a></li>
+                                <li id="themeAuto"><a href="#">${chrome.i18n.getMessage("themeAuto")}</a></li>
                             </ul>
                         </li>
                         <li>
@@ -105,20 +578,6 @@
                         </li>
                         <li>
                             <a><span id="usage"></span></a>
-                        </li>
-                        <li class="dropdown">
-                            <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button"
-                                aria-haspopup="true" aria-expanded="false"><span class="glyphicon glyphicon-heart"></span> ${chrome.i18n.getMessage("donate")}<span class="caret"></span></a>
-                            <ul id="others" class="dropdown-menu">
-                                <li>
-                                    <img src="https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/wx.jpg">
-                                </li>
-                                <li role="separator" class="divider"></li>
-                                <li>
-                                    <img src="https://scoful-picgo.oss-ap-southeast-1.aliyuncs.com/picgo/zfb.jpg">
-                                </li>
-                                    
-                            </ul>
                         </li>
                     </ul>
                 </div>
@@ -129,6 +588,10 @@
         // 动态加载内容
         document.getElementById("body").innerHTML = `
         <div>
+                <div id="searchArea">
+                    <input type="text" id="searchInput" placeholder="${chrome.i18n.getMessage("searchPlaceholder")}">
+                    <div id="searchResults" class="hide"></div>
+                </div>
                 <div id="importOneTab"  class="hide">
                     <span>${chrome.i18n.getMessage("hideShowImportOnetabFunction")}</span>
                     <textarea id="importOnetabTextarea" style="width: 100%; height: 200px; margin-top:5px">
@@ -160,6 +623,11 @@ https://www.google.com | Google
                             class="btn btn-default">${chrome.i18n.getMessage("importToLocal")}</button>
                         <span>${chrome.i18n.getMessage("importWarn")}</span>
                     </div>
+                    <div style="margin-bottom:5px">
+                        <span>${chrome.i18n.getMessage("importBackupFile")}</span>
+                        <input type="file" id="importBackupFile" accept=".json" style="display:inline-block">
+                        <div><span>${chrome.i18n.getMessage("importBackupTip")}</span></div>
+                    </div>
                 </div>
                 <div id="exportDefault" class="hide">
                     <sapn>${chrome.i18n.getMessage("hideShowExportFunction")}</sapn>
@@ -167,6 +635,11 @@ https://www.google.com | Google
                     <div style="margin-bottom:5px">
                         <button id="export" type="button" class="btn btn-default">${chrome.i18n.getMessage("exportToLocal")}</button>
                         <span>${chrome.i18n.getMessage("exportWarn")}</span>
+                    </div>
+                    <div style="margin-bottom:5px">
+                        <button id="exportHtml" type="button" class="btn btn-default">${chrome.i18n.getMessage("exportHtmlFile")}</button>
+                        <button id="exportBackup" type="button" class="btn btn-default">${chrome.i18n.getMessage("exportBackupFile")}</button>
+                        <span>${chrome.i18n.getMessage("exportFileTip")}</span>
                     </div>
                 </div>
                 <div id="tabGroups"></div>
@@ -187,6 +660,24 @@ https://www.google.com | Google
         `;
 
         // 控制导航阴影
+
+        // 主题菜单点击
+        document.getElementById('themeLight').addEventListener('click', function () {
+            setThemeMode("light");
+        });
+        document.getElementById('themeDark').addEventListener('click', function () {
+            setThemeMode("dark");
+        });
+        document.getElementById('themeAuto').addEventListener('click', function () {
+            setThemeMode("auto");
+        });
+
+        // 先按 localStorage 镜像立即应用一次主题（正式值随后在 storage 初始化时校正）
+        try {
+            applyTheme(localStorage.getItem("themeModeMirror") || "auto");
+        } catch (e) {
+            applyTheme("auto");
+        }
         $("#navbar ul li").click(function () {
             $(this).addClass("active").siblings().removeClass("active");
         })
@@ -347,43 +838,22 @@ https://www.google.com | Google
                     }
                 });
             }
-            // 处理是否划词翻译
-            let dragOpenTranslate = items.dragOpenTranslate
-            if (dragOpenTranslate) {
-                $('#dragOpenTranslate').bootstrapSwitch({
-                    state: true,
-                    onText: `${chrome.i18n.getMessage("yes")}`,
-                    offText: `${chrome.i18n.getMessage("no")}`,
-                    onColor: "success",
-                    offColor: "danger",
-                    onSwitchChange: function (event, state) {
-                        if (state === true) {
-                            chrome.storage.local.set({"dragOpenTranslate": true});
-                        } else {
-                            chrome.storage.local.set({"dragOpenTranslate": false});
-                        }
-                    }
-                });
-            } else {
-                $('#dragOpenTranslate').bootstrapSwitch({
-                    state: false,
-                    onText: `${chrome.i18n.getMessage("yes")}`,
-                    offText: `${chrome.i18n.getMessage("no")}`,
-                    onColor: "success",
-                    offColor: "danger",
-                    onSwitchChange: function (event, state) {
-                        if (state === true) {
-                            chrome.storage.local.set({"dragOpenTranslate": true});
-                        } else {
-                            chrome.storage.local.set({"dragOpenTranslate": false});
-                        }
-                    }
-                });
-            }
+            // 应用保存的主题设置（没保存过时为 undefined，applyTheme 按 auto 跟随系统处理）
+            applyTheme(items.themeMode);
+        });
+
+        // 先读回收站保留天数设置，再按它清理一遍过期的标签组（设置为0时不自动清理，只补deletedAt）
+        chrome.storage.local.get("delRetentionDays", function (retentionItems) {
+            cleanupExpiredDelTabGroups(retentionItems ? retentionItems.delRetentionDays : undefined);
         });
 
         // 展示所有标签
         showAllTabs();
+
+        // 全局搜索（阶段D）：输入时实时过滤，结果渲染到独立只读结果区，原列表隐藏；清空即恢复
+        document.getElementById('searchInput').addEventListener('input', function () {
+            renderSearchResults();
+        });
 
         // 把从onetab导出的数据导入，不管插件原先是否有数据，有置顶，全部追加到最后
         document.getElementById('importOnetabMode').addEventListener('click', function () {
@@ -530,6 +1000,94 @@ https://www.google.com | Google
                 }
                 $('#exportTextarea').val(exportTextarea)
             });
+        });
+
+        // 把一段文本下载成文件（阶段C：单文件导出共用）
+        function downloadTextFile(fileName, text, mimeType) {
+            let blob = new Blob([text], {type: mimeType + ";charset=utf-8"});
+            let url = URL.createObjectURL(blob);
+            let a = document.createElement("a");
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(function () {
+                URL.revokeObjectURL(url);
+            }, 1000);
+        }
+
+        // 导出为网页文件：一个 .html 单文件，双击就能打开看、点开链接，含组名/收集时间/锁定置顶标记
+        document.getElementById('exportHtml').addEventListener('click', function () {
+            getShardings(function (items) {
+                let now = new Date();
+                let html = buildExportHtml(items.tabGroups || [], {
+                    title: `${chrome.i18n.getMessage("htmlExportTitle")}`,
+                    exportedAt: now.toLocaleString(),
+                    exportedAtText: `${chrome.i18n.getMessage("htmlExportedAt")}`,
+                    lockedText: `${chrome.i18n.getMessage("htmlLocked")}`,
+                    pinnedText: `${chrome.i18n.getMessage("htmlPinned")}`
+                });
+                downloadTextFile("ntab-export-" + formatExportFileDate(now) + ".html", html, "text/html");
+            });
+        });
+
+        // 导出完整备份：一个 .json 单文件，含全部字段（含回收站），可原样导入恢复
+        document.getElementById('exportBackup').addEventListener('click', function () {
+            getShardings(function (items) {
+                let backup = buildBackupObject(items);
+                downloadTextFile("ntab-backup-" + formatExportFileDate(new Date()) + ".json", JSON.stringify(backup, null, 2), "application/json");
+            });
+        });
+
+        // 从备份文件导入：严格校验通过才写数据；追加合并，不覆盖现有标签，备份里的原始字段（含 date）原样并入，不走 makeTabGroup 重建
+        document.getElementById('importBackupFile').addEventListener('change', function (event) {
+            let file = event.target.files && event.target.files[0];
+            if (!file) {
+                return;
+            }
+            let reader = new FileReader();
+            reader.onload = function () {
+                let backup;
+                try {
+                    backup = JSON.parse(reader.result);
+                } catch (e) {
+                    alert(`${chrome.i18n.getMessage("backupInvalid")}`);
+                    event.target.value = "";
+                    return;
+                }
+                let check = validateBackupObject(backup);
+                if (!check.ok) {
+                    alert(`${chrome.i18n.getMessage("backupInvalid")}`);
+                    event.target.value = "";
+                    return;
+                }
+                let tabCount = 0;
+                for (let i = 0; i < backup.tabGroups.length; i++) {
+                    tabCount += backup.tabGroups[i].tabs.length;
+                }
+                if (!confirm(`${chrome.i18n.getMessage("backupImportConfirm")}（${backup.tabGroups.length}${chrome.i18n.getMessage("group")} / ${tabCount}${chrome.i18n.getMessage("totals")}）`)) {
+                    event.target.value = "";
+                    return;
+                }
+                getShardings(function (items) {
+                    // 统一追加到现有数据末尾（包括备份里的置顶组，不调整顺序），原有数据一条不动
+                    let merged = (Array.isArray(items.tabGroups) ? items.tabGroups : []).concat(backup.tabGroups);
+                    saveShardings(merged, "object");
+                    if (Array.isArray(backup.delTabGroups) && backup.delTabGroups.length > 0) {
+                        let mergedDel = (Array.isArray(items.delTabGroups) ? items.delTabGroups : []).concat(backup.delTabGroups);
+                        saveShardings(mergedDel, "del");
+                    }
+                    alert(`${chrome.i18n.getMessage("backupImportSuccess")}`);
+                    setTimeout(refresh, 300);
+                });
+                event.target.value = "";
+            };
+            reader.onerror = function () {
+                alert(`${chrome.i18n.getMessage("backupInvalid")}`);
+                event.target.value = "";
+            };
+            reader.readAsText(file);
         });
 
         // 控制2种已使用状态的切换
@@ -740,11 +1298,18 @@ https://www.google.com | Google
                     $("#tabGroupsBak").addClass("hide")
                     $("#importDefault").addClass("hide")
                     $("#exportDefault").addClass("hide")
+                    $("#searchArea").removeClass("hide");
                     $("#tabGroups").removeClass("hide");
                     // 展示所有标签
                     showAllTabs();
+                    // 搜索词还在时保持原列表隐藏、只看搜索结果（与 renderSearchResults 的状态一致）
+                    let searchInputEl = document.getElementById("searchInput");
+                    if (searchInputEl && searchInputEl.value.trim()) {
+                        $("#tabGroups").addClass("hide");
+                    }
                     break;
                 case "#logs": //打开 日志页
+                    $("#searchArea").addClass("hide");
                     $("#tabGroups").addClass("hide")
                     $("#tabGroupsBak").addClass("hide")
                     $("#options").addClass("hide")
@@ -756,6 +1321,7 @@ https://www.google.com | Google
                     showAllLogs();
                     break;
                 case "#options": //打开 配置页
+                    $("#searchArea").addClass("hide");
                     $("#logs").addClass("hide");
                     $("#tabGroups").addClass("hide");
                     $("#tabGroupsBak").addClass("hide");
@@ -767,6 +1333,7 @@ https://www.google.com | Google
                     showOptions();
                     break;
                 case "#importOnetab": //打开 导入oneTab的url功能
+                    $("#searchArea").addClass("hide");
                     $("#logs").addClass("hide");
                     $("#tabGroups").addClass("hide");
                     $("#tabGroupsBak").addClass("hide");
@@ -776,6 +1343,7 @@ https://www.google.com | Google
                     $("#importOneTab").removeClass("hide")
                     break;
                 case "#importDefault": //打开 导入默认格式的url功能
+                    $("#searchArea").addClass("hide");
                     $("#logs").addClass("hide");
                     $("#tabGroups").addClass("hide");
                     $("#tabGroupsBak").addClass("hide");
@@ -785,6 +1353,7 @@ https://www.google.com | Google
                     $("#importDefault").removeClass("hide")
                     break;
                 case "#export": //打开 导出默认格式的url功能
+                    $("#searchArea").addClass("hide");
                     $("#logs").addClass("hide");
                     $("#tabGroups").addClass("hide");
                     $("#tabGroupsBak").addClass("hide");
@@ -1673,7 +2242,14 @@ https://www.google.com | Google
     }
 
     // 保存数据到local storage
+    // 注意：保存后要清掉比新数据多出来的旧分片，不然删掉的数据会残留占空间、甚至“复活”；
+    // 数据为空时也要真正清空（分片数量写0，并移除所有旧分片）。
     function saveShardings(tabGroup, type) {
+        // 前缀（tabGroups_ 是正常标签，del_tabGroups_ 是回收站）
+        let prefix = "tabGroups_"
+        if (type === "del") {
+            prefix = "del_tabGroups_"
+        }
         let tabGroupStr;
         if (type === "object") {
             tabGroupStr = JSON.stringify(tabGroup);
@@ -1682,18 +2258,36 @@ https://www.google.com | Google
         } else if (type === "del") {
             tabGroupStr = JSON.stringify(tabGroup);
         }
-        if (tabGroupStr && tabGroupStr !== 'null' && tabGroupStr !== 'undefined') {
+        // 是否为空数据（空数组、空字符串、null、undefined 都算）
+        let isEmpty = (Array.isArray(tabGroup) && tabGroup.length === 0)
+            || !tabGroupStr || tabGroupStr === 'null' || tabGroupStr === 'undefined';
+        // 先查一下旧的分片数量，保存完才知道哪些旧分片是多余的
+        chrome.storage.local.get(prefix + "num", function (items) {
+            let oldNum = 0;
+            if (items && typeof items[prefix + "num"] === 'number') {
+                oldNum = items[prefix + "num"];
+            }
+            if (isEmpty) {
+                // 真正清空：分片数量写0，并移除所有旧分片
+                let emptySlices = {};
+                emptySlices[prefix + "num"] = 0;
+                chrome.storage.local.set(emptySlices, function () {
+                    if (oldNum > 0) {
+                        let staleKeys = [];
+                        for (let i = 0; i < oldNum; i++) {
+                            staleKeys.push(prefix + i);
+                        }
+                        chrome.storage.local.remove(staleKeys);
+                    }
+                });
+                return;
+            }
             // 字符串有值的逻辑
             let length = tabGroupStr.length;
             let sliceLength = 102400;
             let tabGroupSlices = {}; // 保存分片数据
             let i = 0; // 分片序号
 
-            // 前缀
-            let prefix = "tabGroups_"
-            if (type === "del") {
-                prefix = "del_tabGroups_"
-            }
             // 分片保存数据
             while (length > 0) {
                 tabGroupSlices[prefix + i] = tabGroupStr.substr(i * sliceLength, sliceLength);
@@ -1704,12 +2298,103 @@ https://www.google.com | Google
             // 保存分片数量
             tabGroupSlices[prefix + "num"] = i;
 
-            // 写入Storage
-            chrome.storage.local.set(tabGroupSlices);
-        } else {
-            // 字符串为空或为 null 或 undefined 的逻辑
-            console.log('为空或为null/undefined');
+            // 写入Storage，写完再清掉多出来的旧分片
+            chrome.storage.local.set(tabGroupSlices, function () {
+                if (oldNum > i) {
+                    let staleKeys = [];
+                    for (let j = i; j < oldNum; j++) {
+                        staleKeys.push(prefix + j);
+                    }
+                    chrome.storage.local.remove(staleKeys);
+                }
+            });
+        });
+    }
+
+    // ===== A2补完：回收站保留天数可设置 / 每组剩余天数 / 立即清空回收站 =====
+    // 保留天数设置存 chrome.storage.local 顶层键 delRetentionDays（数字），
+    // 只接受 7 / 30 / 90 / 0 四个值，0 = 不自动清理（永久保留）；没设置过或存了非法值时按默认 30 天。
+    const DEL_RETENTION_DEFAULT_DAYS = 30;
+    const DEL_RETENTION_DAY_MS = 24 * 60 * 60 * 1000;
+    const DEL_RETENTION_OPTIONS = [7, 30, 90, 0];
+
+    // 纯函数：把任意来源的保留天数设置值规范成合法值（可单测）。
+    // 注意 null / "" 的 Number() 是 0，不能让它们被误判成「永久保留」，先按未设置处理。
+    function normalizeDelRetentionDays(value) {
+        if (value === null || typeof value === "undefined" || value === "") {
+            return DEL_RETENTION_DEFAULT_DAYS;
         }
+        let days = Number(value);
+        return DEL_RETENTION_OPTIONS.indexOf(days) !== -1 ? days : DEL_RETENTION_DEFAULT_DAYS;
+    }
+
+    // 纯函数：一个回收站组还剩多少天会被自动删除（可单测）。
+    // 返回 null 表示不显示这行：永久保留（保留天数 0），或 deletedAt 还不是有效时间戳
+    // （旧组会在管理页打开时被补上 deletedAt，补上之后才有剩余天数可算）。
+    // 返回 0 表示已到期（下次打开管理页就会被清理），永远不会返回负数。
+    function delGroupRemainingDays(deletedAt, retentionDays, now) {
+        let days = normalizeDelRetentionDays(retentionDays);
+        if (days === 0) {
+            return null;
+        }
+        if (typeof deletedAt !== 'number' || !isFinite(deletedAt)) {
+            return null;
+        }
+        let remainingMs = days * DEL_RETENTION_DAY_MS - (now - deletedAt);
+        if (remainingMs <= 0) {
+            return 0;
+        }
+        return Math.ceil(remainingMs / DEL_RETENTION_DAY_MS);
+    }
+
+    // 纯函数：按保留天数过滤回收站组数组（可单测），返回 {kept, changed}。
+    // 语义与阶段A一致，只把写死的30天换成参数：
+    // 1. 没有有效 deletedAt 的旧组补上 now（从补戳时间起算保留期，不会一升级就被删光）；
+    //    保留天数为 0 时也照样补戳，保证以后改回有限天数时从补戳时间起算；
+    // 2. 保留天数不为 0 且 deletedAt 距今已满保留期的组剔除（彻底删除）；
+    // 3. 非对象元素原样保留，绝不误删看不懂的数据。
+    function pruneExpiredDelTabGroups(delTabGroups, retentionDays, now) {
+        let days = normalizeDelRetentionDays(retentionDays);
+        let changed = false;
+        let kept = [];
+        for (let i = 0; i < delTabGroups.length; i++) {
+            let group = delTabGroups[i];
+            if (!group || typeof group !== 'object') {
+                kept.push(group);
+                continue;
+            }
+            if (typeof group.deletedAt !== 'number' || !isFinite(group.deletedAt)) {
+                group.deletedAt = now;
+                changed = true;
+            }
+            if (days !== 0 && now - group.deletedAt >= days * DEL_RETENTION_DAY_MS) {
+                // 已过期，彻底删除（不放进kept）
+                changed = true;
+            } else {
+                kept.push(group);
+            }
+        }
+        return {kept: kept, changed: changed};
+    }
+
+    // 管理页每次打开时检查一遍回收站：给旧组补 deletedAt，并把超过保留天数的组彻底删除。
+    // retentionDays 是设置值（内部会规范化）；doneCallback 可选，清理流程走完后调用（改设置后刷新视图用）。
+    function cleanupExpiredDelTabGroups(retentionDays, doneCallback) {
+        getShardings(function (items) {
+            if (!items || !Array.isArray(items.delTabGroups)) {
+                if (doneCallback) {
+                    doneCallback();
+                }
+                return;
+            }
+            let result = pruneExpiredDelTabGroups(items.delTabGroups, retentionDays, Date.now());
+            if (result.changed) {
+                saveShardings(result.kept, "del");
+            }
+            if (doneCallback) {
+                doneCallback();
+            }
+        });
     }
 
     // 保存正常的tabGroup
@@ -1744,6 +2429,10 @@ https://www.google.com | Google
 
     // 保存删除的tabGroup
     function saveDelTabGroup(tabGroup, type) {
+        // 进回收站时记下删除时间（毫秒时间戳），超过保留天数（默认30天，可在回收站里改）会被自动彻底删除
+        if (tabGroup && typeof tabGroup === 'object') {
+            tabGroup.deletedAt = Date.now();
+        }
         getShardings(function (callback) {
             if (callback || typeof callback != 'undefined' || callback !== undefined) {
                 if (!callback.delTabGroups || typeof callback.delTabGroups == 'undefined') {
@@ -1803,6 +2492,8 @@ https://www.google.com | Google
                 opts = storage.options || {
                     deleteTabOnOpen: 'no'
                 };
+            // 恢复时休眠打开的开关（阶段D，存 chrome.storage.local 的 restoreDiscarded，默认 false = 保持原行为）
+            let restoreDiscarded = storage.restoreDiscarded === true;
 
             function saveTabGroups(json) {
                 saveShardings(json, "object");
@@ -1821,6 +2512,8 @@ https://www.google.com | Google
                 this.isLock = m.prop(data.isLock);
                 this.groupTitle = m.prop(data.groupTitle)
                 this.isPined = m.prop(data.isPined)
+                // 标签组备注（阶段D）：旧组没有 note 字段时这里是 undefined，视图按 "" 显示，不批量改写旧数据
+                this.note = m.prop(data.note)
             };
 
             // alias for Array
@@ -1888,6 +2581,14 @@ https://www.google.com | Google
                         }
                         if (groupTitle !== undefined) {
                             tabGroups[index].groupTitle = groupTitle
+                            saveTabGroups(tabGroups);
+                            showAllTabs();
+                        }
+                        // 标签组备注（阶段D）：只增字段，note 原样存回组对象；回收站那份 updateGroup 不加此分支，
+                        // 回收站里的组被还原时 note 会随对象原样保留
+                        let note = groupInfo.note
+                        if (note !== undefined) {
+                            tabGroups[index].note = note
                             saveTabGroups(tabGroups);
                             showAllTabs();
                         }
@@ -1973,107 +2674,157 @@ https://www.google.com | Google
                     }, [m('div.group-title', [m('img' + lockImgClass, {
                         src: "/images/lock.png"
                     }), m('span' + deleteLinkClass, {
-                        onclick: function () {
+                        onclick: function (e) {
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
                             if (isLock) {
                                 showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("cannotDelete")}`)
                             } else {
                                 showConfirmation(`${chrome.i18n.getMessage("confirm")}`, `${chrome.i18n.getMessage("confirmationDel")}`, function () {
-                                    tabs.vm.rmGroup(i);
+                                    tabs.vm.rmGroup(ci);
                                 });
                             }
                         }
                     }), m('img' + pinImgClass, {
                         src: "/images/pin.png"
                     }), ' ', m('span.group-amount', {
-                        onclick: function () {
-                            $("#tabs_" + i).slideToggle();
+                        onclick: function (e) {
+                            $("#tabs_" + currentGroupIndex((e && e.currentTarget) || this, i)).slideToggle();
                         }
                     }, group.tabs().length + `${chrome.i18n.getMessage("tabsNo")}`), ' ', m('span.group-name', {
-                        id: "groupTitle" + i, onclick: function () {
-                            let val = $("#groupTitle" + i).html();
-                            $("#groupTitle" + i).slideToggle(100);
-                            $("#groupTitleInput" + i).slideToggle(1000);
+                        id: "groupTitle" + i, onclick: function (e) {
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                            let val = $("#groupTitle" + ci).html();
+                            $("#groupTitle" + ci).slideToggle(100);
+                            $("#groupTitleInput" + ci).slideToggle(1000);
                             setTimeout(function () {
-                                $("#groupTitleInput" + i).focus();
+                                $("#groupTitleInput" + ci).focus();
                             }, 100);
-                            $("#groupTitleInput" + i).val(val)
+                            $("#groupTitleInput" + ci).val(val)
                         }
                     }, groupTitle), ' ', m('input.group-title-input', {
-                        id: "groupTitleInput" + i, style: "display:none", onchange: function () {
-                            let val = $("#groupTitleInput" + i).val()
-                            $("#groupTitle" + i).html(val)
-                            $("#groupTitle" + i).slideToggle(1000);
-                            $("#groupTitleInput" + i).slideToggle(100);
-                            tabs.vm.updateGroup(i, {groupTitle: val})
-                        }, onblur: function () {
-                            let val = $("#groupTitleInput" + i).val()
-                            $("#groupTitle" + i).html(val)
-                            $("#groupTitle" + i).slideToggle(1000);
-                            $("#groupTitleInput" + i).slideToggle(100);
-                            tabs.vm.updateGroup(i, {groupTitle: val})
+                        id: "groupTitleInput" + i, style: "display:none", onchange: function (e) {
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                            let val = $("#groupTitleInput" + ci).val()
+                            $("#groupTitle" + ci).html(val)
+                            $("#groupTitle" + ci).slideToggle(1000);
+                            $("#groupTitleInput" + ci).slideToggle(100);
+                            tabs.vm.updateGroup(ci, {groupTitle: val})
+                        }, onblur: function (e) {
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                            let val = $("#groupTitleInput" + ci).val()
+                            $("#groupTitle" + ci).html(val)
+                            $("#groupTitle" + ci).slideToggle(1000);
+                            $("#groupTitleInput" + ci).slideToggle(100);
+                            tabs.vm.updateGroup(ci, {groupTitle: val})
                         }
                     }), m('span.group-date', moment(group.date()).format('YYYY-MM-DD HH:mm:ss')), ' ', m('span.restore-all', {
-                        onclick: function () {
+                        onclick: function (e) {
                             let j;
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
 
                             // reason this goes first and not after is because it doesn't work otherwise
                             // I imagine it's because you changed tab and stuff
                             if (opts.deleteTabOnOpen === 'yes') {
                                 if (!isLock) {
-                                    tabs.vm.rmGroup(i);
+                                    tabs.vm.rmGroup(ci);
                                 }
                             }
                             for (j = 0; j < group.tabs().length; j += 1) {
-                                chrome.tabs.create({
-                                    url: group.tabs()[j].url
-                                });
+                                // 休眠打开开关开时以休眠方式打开（阶段D）；关时与原行为完全一致。
+                                // 上面的 deleteTabOnOpen 删除/保留语义不变，休眠只改变打开方式
+                                openRestoredTab(group.tabs()[j].url, restoreDiscarded);
                             }
                         }
                     }, `${chrome.i18n.getMessage("restoreGroup")}`), m('span.delete-all', {
-                        onclick: function () {
+                        onclick: function (e) {
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
                             if (isLock) {
                                 showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("cannotDelete")}`)
                             } else {
                                 showConfirmation(`${chrome.i18n.getMessage("confirm")}`, `${chrome.i18n.getMessage("confirmationDel")}`, function () {
-                                    tabs.vm.rmGroup(i);
+                                    tabs.vm.rmGroup(ci);
                                 });
                             }
                         }
                     }, `${chrome.i18n.getMessage("deleteAll")}`), m('span.about-lock', {
-                        onclick: function () {
-                            tabs.vm.updateGroup(i, {isLock: !isLock})
+                        onclick: function (e) {
+                            tabs.vm.updateGroup(currentGroupIndex((e && e.currentTarget) || this, i), {isLock: !isLock})
                         }
                     }, lockStatus), m('span.about-top', {
-                        onclick: function () {
-                            tabs.vm.updateGroup(i, {toTop: !isPined})
+                        onclick: function (e) {
+                            tabs.vm.updateGroup(currentGroupIndex((e && e.currentTarget) || this, i), {toTop: !isPined})
                         }
                     }, pinStatus), m('span.about-name', {
-                        onclick: function () {
-                            let val = $("#groupTitle" + i).html();
-                            $("#groupTitle" + i).slideToggle(100);
-                            $("#groupTitleInput" + i).slideToggle(1000);
+                        onclick: function (e) {
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                            let val = $("#groupTitle" + ci).html();
+                            $("#groupTitle" + ci).slideToggle(100);
+                            $("#groupTitleInput" + ci).slideToggle(1000);
                             setTimeout(function () {
-                                $("#groupTitleInput" + i).focus();
+                                $("#groupTitleInput" + ci).focus();
                             }, 100);
-                            $("#groupTitleInput" + i).val(val)
+                            $("#groupTitleInput" + ci).val(val)
                         }
-                    }, `${chrome.i18n.getMessage("nameThis")}`),]), // foreach tab
+                    }, `${chrome.i18n.getMessage("nameThis")}`), m('span.about-note', {
+                        onclick: function (e) {
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                            let cur = (tabGroups[ci] && typeof tabGroups[ci].note === "string") ? tabGroups[ci].note : "";
+                            $("#groupNote" + ci).slideToggle(100);
+                            $("#groupNoteInput" + ci).slideToggle(1000);
+                            setTimeout(function () {
+                                $("#groupNoteInput" + ci).focus();
+                            }, 100);
+                            $("#groupNoteInput" + ci).val(cur)
+                        }
+                    }, `${chrome.i18n.getMessage("groupNote")}`)]), // 备注行（阶段D）：有备注时在组标题下方以小号灰字显示全文；点备注或上面「备注」操作切换成内联输入框编辑（与组名编辑同款交互）
+                        m('div.group-note-row', [m('span.group-note', {
+                            id: "groupNote" + i, onclick: function (e) {
+                                let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                                let cur = (tabGroups[ci] && typeof tabGroups[ci].note === "string") ? tabGroups[ci].note : "";
+                                $("#groupNote" + ci).slideToggle(100);
+                                $("#groupNoteInput" + ci).slideToggle(1000);
+                                setTimeout(function () {
+                                    $("#groupNoteInput" + ci).focus();
+                                }, 100);
+                                $("#groupNoteInput" + ci).val(cur)
+                            }
+                        }, (typeof group.note() === "string" ? group.note() : "")), m('input.group-note-input', {
+                            id: "groupNoteInput" + i, style: "display:none", onchange: function (e) {
+                                let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                                let val = $("#groupNoteInput" + ci).val()
+                                $("#groupNote" + ci).text(val)
+                                $("#groupNote" + ci).slideToggle(1000);
+                                $("#groupNoteInput" + ci).slideToggle(100);
+                                tabs.vm.updateGroup(ci, {note: val})
+                            }, onblur: function (e) {
+                                let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                                let val = $("#groupNoteInput" + ci).val()
+                                $("#groupNote" + ci).text(val)
+                                $("#groupNote" + ci).slideToggle(1000);
+                                $("#groupNoteInput" + ci).slideToggle(100);
+                                tabs.vm.updateGroup(ci, {note: val})
+                            }
+                        })]), // foreach tab
                         m('ul' + tabClass + lockClass, {
                             id: "tabs_" + i
                         }, group.tabs().map(function (tab, ii) {
                             return m('li.li-hover.li-standard', [m('span' + deleteLinkClass, {
-                                onclick: function () {
+                                onclick: function (e) {
+                                    let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                                    let cii = currentTabIndex((e && e.currentTarget) || this, ii);
                                     if (isLock) {
                                         showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("cannotDelete")}`)
                                     } else {
-                                        tabs.vm.rmTab(i, ii);
+                                        tabs.vm.rmTab(ci, cii);
                                     }
                                 }
                             }), m('span.link', {
-                                title: tab.title + "\n" + tab.url, onclick: function () {
+                                title: tab.title + "\n" + tab.url, onclick: function (e) {
+                                    let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                                    let cii = currentTabIndex((e && e.currentTarget) || this, ii);
                                     if (opts.deleteTabOnOpen === 'yes') {
                                         if (!isLock) {
-                                            tabs.vm.rmTab(i, ii);
+                                            tabs.vm.rmTab(ci, cii);
                                         }
                                     }
                                     chrome.tabs.create({
@@ -2089,21 +2840,22 @@ https://www.google.com | Google
             // init the app
             m.module(document.getElementById('tabGroups'), {controller: tabs.controller, view: tabs.view});
 
+            // 重建 Sortable 前先销毁上一轮的实例并清空数组，避免实例叠加泄漏、越拖越卡（阶段B）
+            if (sortableTitle) {
+                sortableTitle.destroy();
+                sortableTitle = undefined;
+            }
+            for (let si = 0; si < sortableTabList.length; si += 1) {
+                sortableTabList[si].destroy();
+            }
+            sortableTabList.length = 0;
+
             // 以下是超级拖曳的相关代码
             if (storage.dragType === "dragTitle") {
-                if (sortableTabList.length > 0) {
-                    let j;
-                    for (j = 0; j < sortableTabList.length; j += 1) {
-                        sortableTabList[j].option("disabled", true);
-                    }
-                }
-                if (typeof (sortableTitle) != "undefined") {
-                    sortableTitle.option("disabled", false);
-                } else {
-                    sortableTitle = Sortable.create(document.getElementById("tabGroups"), {
+                sortableTitle = Sortable.create(document.getElementById("tabGroups"), {
                         group: {
                             name: "tabGroups", pull: false, put: false
-                        }, scroll: true, easing: "cubic-bezier(1, 0, 0, 1)", animation: 150, //动画参数
+                        }, scroll: true, easing: "cubic-bezier(1, 0, 0, 1)", animation: 100, //动画参数
                         ghostClass: 'ghost', filter: '.filtered', onEnd: function (evt) { //拖拽完毕之后发生该事件
                             // console.log(evt)
                             // console.log(evt.item);
@@ -2114,30 +2866,25 @@ https://www.google.com | Google
                             // console.log(evt.oldDraggableIndex);
                             // console.log(evt.newDraggableIndex);
                             tabs.vm.moveGroup(evt.oldIndex, evt.newIndex);
-                            showAllTabs();
+                            // 同步 mithril 的 vm.list 顺序：点击等事件后 mithril 会按 vm.list 做 diff 重绘，不同步会把顺序画回拖动前
+                            let movedGroup = tabs.vm.list.splice(evt.oldIndex, 1)[0];
+                            if (movedGroup) {
+                                tabs.vm.list.splice(evt.newIndex, 0, movedGroup);
+                            }
+                            // 不再全量重渲染（Sortable 已把 DOM 节点移到正确位置），只同步写死在 DOM 上的序号/计数
+                            syncDragDomOrder("tabGroups", "");
                         }
                     });
-                }
 
             }
 
             if (storage.dragType === "dragUrls") {
-                if (sortableTabList.length > 0) {
-                    let j;
-                    for (j = 0; j < sortableTabList.length; j += 1) {
-                        sortableTabList[j].option("disabled", false);
-                    }
-                }
                 let j;
-                if (typeof (sortableTitle) != "undefined") {
-                    sortableTitle.option("disabled", true);
-                }
-                sortableTabList.length = 0;
                 for (j = 0; j < bridge.length; j += 1) {
                     let sortableTab = Sortable.create(document.getElementById("tabs_" + j), {
                         group: {
                             name: "tabs", pull: true, put: true
-                        }, easing: "cubic-bezier(1, 0, 0, 1)", scroll: true, swapThreshold: 0.65, animation: 150, //动画参数
+                        }, easing: "cubic-bezier(1, 0, 0, 1)", scroll: true, swapThreshold: 0.65, animation: 100, //动画参数
                         filter: '.filtered', onEnd: function (evt) {
                             // console.log(evt)
                             // console.log(evt.item);
@@ -2149,7 +2896,8 @@ https://www.google.com | Google
                             // console.log(evt.newDraggableIndex);
                             // console.log("从" + evt.from.parentNode.id + "的" + evt.oldIndex + "到" + evt.to.parentNode.id + "的" + evt.newIndex)
                             tabs.vm.moveTab(evt.from.parentNode.id, evt.oldIndex, evt.to.parentNode.id, evt.newIndex)
-                            showAllTabs();
+                            // 标签数据数组与 vm.list 里组对象的 tabs 是同一引用，moveTab 已同步；不再全量重渲染，只同步 DOM 上的序号/计数
+                            syncDragDomOrder("tabGroups", "");
                         }
                     })
                     sortableTabList.push(sortableTab);
@@ -2226,6 +2974,111 @@ https://www.google.com | Google
         });
     }
 
+    // ===== WebDAV 同步（阶段C：只做手动上传/恢复，不接进 background 的 Gist 定时器） =====
+    // 从配置页的输入框读 WebDAV 配置，顺手存一份到 chrome.storage.local（只存本机，密码不去任何别的地方）
+    function readWebDavConfig() {
+        let urlEl = document.getElementById("webdavUrl");
+        if (!urlEl) {
+            return null;
+        }
+        let cfg = {
+            webdavUrl: urlEl.value.trim(),
+            webdavUser: document.getElementById("webdavUser").value.trim(),
+            // 密码不 trim：首尾空格也可能是密码的一部分
+            webdavPass: document.getElementById("webdavPass").value,
+            webdavFile: document.getElementById("webdavFile").value.trim() || "ntab-backup.json"
+        };
+        chrome.storage.local.set(cfg);
+        return cfg;
+    }
+
+    // 上传备份到 WebDAV：PUT 一份和“导出完整备份”完全相同的 JSON 到 服务器地址/备份文件名
+    // 失败只报错，不动本地任何数据
+    function uploadBackupToWebDav() {
+        let cfg = readWebDavConfig();
+        if (!cfg || !cfg.webdavUrl) {
+            alert(`${chrome.i18n.getMessage("webdavConfigMissing")}`);
+            return;
+        }
+        getShardings(function (items) {
+            let backup = buildBackupObject(items);
+            let headers = {
+                "Authorization": buildBasicAuthHeader(cfg.webdavUser, cfg.webdavPass),
+                "Content-Type": "application/json; charset=utf-8"
+            };
+            fetch(buildWebDavFileUrl(cfg.webdavUrl, cfg.webdavFile), {
+                method: "PUT",
+                headers: headers,
+                // 认证只走上面的 Authorization 头：credentials:"omit" 阻止浏览器在收到
+                // 401+WWW-Authenticate 时弹自带的账号密码框并把 fetch 无限挂起（密码输错时
+                // 就会这样，阶段E实测）；省略后能立刻拿到 401 并走下面的报错提示。
+                credentials: "omit",
+                body: JSON.stringify(backup)
+            }).then(function (resp) {
+                if (!resp.ok) {
+                    throw new Error("HTTP " + resp.status);
+                }
+                alert(`${chrome.i18n.getMessage("webdavUploadSuccess")}`);
+            }).catch(function (err) {
+                alert(`${chrome.i18n.getMessage("webdavUploadFailed")} ${err.message}`);
+            });
+        });
+    }
+
+    // 从 WebDAV 恢复：先确认 → GET 下载 → 按完整备份的规则严格校验 →
+    // 覆盖前先把当前本地数据快照存到 webdavRestoreSnapshot 键（含时间戳）→ 再整体替换两套数据
+    // 任何一步失败都不会改本地数据
+    function restoreBackupFromWebDav() {
+        let cfg = readWebDavConfig();
+        if (!cfg || !cfg.webdavUrl) {
+            alert(`${chrome.i18n.getMessage("webdavConfigMissing")}`);
+            return;
+        }
+        if (!confirm(`${chrome.i18n.getMessage("webdavRestoreConfirm")}`)) {
+            return;
+        }
+        fetch(buildWebDavFileUrl(cfg.webdavUrl, cfg.webdavFile), {
+            method: "GET",
+            // 同上传：认证只走 Authorization 头，避免 401 时被浏览器认证框挂起（见 uploadBackupToWebDav 注释）
+            credentials: "omit",
+            headers: {"Authorization": buildBasicAuthHeader(cfg.webdavUser, cfg.webdavPass)}
+        }).then(function (resp) {
+            if (!resp.ok) {
+                throw new Error("HTTP " + resp.status);
+            }
+            return resp.text();
+        }).then(function (text) {
+            let backup;
+            try {
+                backup = JSON.parse(text);
+            } catch (e) {
+                alert(`${chrome.i18n.getMessage("webdavRestoreFailed")} ${chrome.i18n.getMessage("backupInvalid")}`);
+                return;
+            }
+            let check = validateBackupObject(backup);
+            if (!check.ok) {
+                alert(`${chrome.i18n.getMessage("webdavRestoreFailed")} ${chrome.i18n.getMessage("backupInvalid")}`);
+                return;
+            }
+            getShardings(function (items) {
+                // 先存快照，快照存好之后才开始替换，万一恢复错了可以按快照找回（找回方法见 CHECKPOINT 阶段C记录）
+                let snapshot = {
+                    savedAt: new Date().toISOString(),
+                    tabGroups: Array.isArray(items.tabGroups) ? items.tabGroups : [],
+                    delTabGroups: Array.isArray(items.delTabGroups) ? items.delTabGroups : []
+                };
+                chrome.storage.local.set({webdavRestoreSnapshot: snapshot}, function () {
+                    saveShardings(backup.tabGroups, "object");
+                    saveShardings(Array.isArray(backup.delTabGroups) ? backup.delTabGroups : [], "del");
+                    alert(`${chrome.i18n.getMessage("webdavRestoreSuccess")}`);
+                    setTimeout(refresh, 300);
+                });
+            });
+        }).catch(function (err) {
+            alert(`${chrome.i18n.getMessage("webdavRestoreFailed")} ${err.message}`);
+        });
+    }
+
     // 展示配置
     function showOptions() {
         chrome.storage.local.get(null, function (storage) {
@@ -2242,12 +3095,30 @@ https://www.google.com | Google
                 $('input[name="openBackgroundAfterSendTab"][value="' + opts.openBackgroundAfterSendTab + '"]').prop('checked', 'checked');
             }
 
+            // 恢复时休眠打开开关的当前值（阶段D，默认未勾选 = 保持原行为）
+            let restoreDiscardedEl = document.getElementById("restoreDiscarded");
+            if (restoreDiscardedEl && storage.restoreDiscarded) {
+                restoreDiscardedEl.checked = true;
+            }
             // 如果已经有保存token就直接列出
             if (storage.githubGistToken) {
                 document.getElementById("githubToken").value = storage.githubGistToken
             }
             if (storage.giteeGistToken) {
                 document.getElementById("giteeToken").value = storage.giteeGistToken
+            }
+            // 如果已经有保存WebDAV配置就直接列出
+            if (storage.webdavUrl) {
+                document.getElementById("webdavUrl").value = storage.webdavUrl
+            }
+            if (storage.webdavUser) {
+                document.getElementById("webdavUser").value = storage.webdavUser
+            }
+            if (storage.webdavPass) {
+                document.getElementById("webdavPass").value = storage.webdavPass
+            }
+            if (storage.webdavFile) {
+                document.getElementById("webdavFile").value = storage.webdavFile
             }
         });
         document.getElementById("options").innerHTML = `
@@ -2268,6 +3139,15 @@ https://www.google.com | Google
                 <div class="choices">
                     <p><label for="openBackgroundAfterSendTab"><input type="radio" name="openBackgroundAfterSendTab" value="yes"><span class="radio-label">${chrome.i18n.getMessage("openBackgroundAfterSendTabYes")}</span></label></p>
                     <p><label for="openBackgroundAfterSendTab"><input type="radio" name="openBackgroundAfterSendTab" value="no"><span class="radio-label">${chrome.i18n.getMessage("openBackgroundAfterSendTabNo")}</span></label></p>
+                </div>
+            </div>
+            <hr>
+            <div class="option">
+                <div class="desc">
+                    <p>${chrome.i18n.getMessage("restoreDiscarded")}</p>
+                </div>
+                <div class="choices">
+                    <p><label><input type="checkbox" id="restoreDiscarded"><span> ${chrome.i18n.getMessage("restoreDiscardedEnable")}</span></label></p>
                 </div>
             </div>
             <hr>
@@ -2295,6 +3175,41 @@ https://www.google.com | Google
               </div>
             </div>
             <hr>
+            <div class="option">
+                <div class="desc">
+                    <p>${chrome.i18n.getMessage("webdavTitle")}</p>
+                </div>
+            </div>
+            <div class="form-group row">
+              <label for="webdavUrl" class="col-sm-2 control-label">${chrome.i18n.getMessage("webdavUrl")}:</label>
+              <div class="col-sm-5">
+                <input type="text" class="form-control" id="webdavUrl" placeholder="https://dav.example.com/remote.php/dav/files/user/">
+              </div>
+            </div>
+            <div class="form-group row">
+              <label for="webdavUser" class="col-sm-2 control-label">${chrome.i18n.getMessage("webdavUser")}:</label>
+              <div class="col-sm-5">
+                <input type="text" class="form-control" id="webdavUser" placeholder="${chrome.i18n.getMessage("input")}${chrome.i18n.getMessage("webdavUser")}">
+              </div>
+            </div>
+            <div class="form-group row">
+              <label for="webdavPass" class="col-sm-2 control-label">${chrome.i18n.getMessage("webdavPass")}:</label>
+              <div class="col-sm-5">
+                <input type="password" class="form-control" id="webdavPass" placeholder="${chrome.i18n.getMessage("input")}${chrome.i18n.getMessage("webdavPass")}">
+              </div>
+            </div>
+            <div class="form-group row">
+              <label for="webdavFile" class="col-sm-2 control-label">${chrome.i18n.getMessage("webdavFile")}:</label>
+              <div class="col-sm-5">
+                <input type="text" class="form-control" id="webdavFile" placeholder="ntab-backup.json">
+              </div>
+            </div>
+            <p>${chrome.i18n.getMessage("webdavPassTip")}</p>
+            <div style="margin-bottom:5px">
+                <button id="webdavUpload" type="button" class="btn btn-default">${chrome.i18n.getMessage("webdavUpload")}</button>
+                <button id="webdavRestore" type="button" class="btn btn-default">${chrome.i18n.getMessage("webdavRestore")}</button>
+            </div>
+            <hr>
             <button id="save">${chrome.i18n.getMessage("saveButtonValue")}</button>
             <div id="saved">${chrome.i18n.getMessage("savedValue")}</div>
         `
@@ -2314,17 +3229,33 @@ https://www.google.com | Google
             let openBackgroundAfterSendTab = document.querySelector('input[name="openBackgroundAfterSendTab"]:checked').value;
             let githubGistToken = document.getElementById("githubToken").value
             let giteeGistToken = document.getElementById("giteeToken").value
+            let webdavUrl = document.getElementById("webdavUrl").value.trim()
+            let webdavUser = document.getElementById("webdavUser").value.trim()
+            let webdavPass = document.getElementById("webdavPass").value
+            let webdavFile = document.getElementById("webdavFile").value.trim() || "ntab-backup.json"
 
             chrome.storage.local.set({
                 options: {
                     deleteTabOnOpen: deleteTabOnOpen, openBackgroundAfterSendTab: openBackgroundAfterSendTab
-                }, githubGistToken: githubGistToken, giteeGistToken: giteeGistToken
+                }, githubGistToken: githubGistToken, giteeGistToken: giteeGistToken,
+                webdavUrl: webdavUrl, webdavUser: webdavUser, webdavPass: webdavPass, webdavFile: webdavFile
             }, function () { // show "settings saved" notice thing
                 document.getElementById('saved').style.display = 'block';
                 window.setTimeout(function () {
                     document.getElementById('saved').style.display = 'none';
                 }, 1000);
             });
+        });
+        // 恢复时休眠打开（阶段D）：勾选即存 chrome.storage.local 的 restoreDiscarded，不依赖下面的保存按钮
+        document.getElementById('restoreDiscarded').addEventListener('change', function () {
+            chrome.storage.local.set({restoreDiscarded: this.checked});
+        });
+        // WebDAV 手动同步：上传备份 / 从 WebDAV 恢复
+        document.getElementById('webdavUpload').addEventListener('click', function () {
+            uploadBackupToWebDav();
+        });
+        document.getElementById('webdavRestore').addEventListener('click', function () {
+            restoreBackupFromWebDav();
         });
         document.getElementById('changeEye').addEventListener('click', function () {
             let passwordInput = document.getElementById("githubToken");
@@ -2428,6 +3359,7 @@ https://www.google.com | Google
 
     // 展示回收站内容
     function showAllDelTabs() {
+        $("#searchArea").addClass("hide")
         $("#tabGroups").addClass("hide")
         $("#options").addClass("hide")
         $("#importOneTab").addClass("hide")
@@ -2464,6 +3396,90 @@ https://www.google.com | Google
                 opts = storage.options || {
                     deleteTabOnOpen: 'no'
                 };
+            // 恢复时休眠打开的开关（阶段D，与主列表共用同一个设置，默认 false = 保持原行为）
+            let restoreDiscarded = storage.restoreDiscarded === true;
+
+            // 回收站保留天数设置（A2补完）：storage 里没存过或存了非法值时 normalize 按默认30天处理
+            let delRetentionDays = normalizeDelRetentionDays(storage.delRetentionDays);
+
+            // 提示条文案：有限天数时按现有 i18n 拼接习惯拆成前后两段、中间拼当前天数；
+            // 永久保留（0）时用单独的说明文案
+            function delAutoCleanTipText() {
+                if (delRetentionDays === 0) {
+                    return `${chrome.i18n.getMessage("delAutoCleanForeverTip")}`;
+                }
+                return `${chrome.i18n.getMessage("delAutoCleanTipPrefix")}` + delRetentionDays + `${chrome.i18n.getMessage("delAutoCleanTipSuffix")}`;
+            }
+
+            // 改保留天数：存设置 → 立刻按新值清理一次 → 刷新回收站视图
+            function onDelRetentionChange(e) {
+                let sel = (e && e.currentTarget) || this;
+                let newDays = normalizeDelRetentionDays(sel ? sel.value : undefined);
+                chrome.storage.local.set({delRetentionDays: newDays}, function () {
+                    cleanupExpiredDelTabGroups(newDays, function () {
+                        showAllDelTabs();
+                    });
+                });
+            }
+
+            // 清空回收站：先弹确认框（写明组数/标签数、无法恢复），确认后真正清空 del 分片。
+            // 只调 saveShardings([], "del")，绝不触碰正常 tabGroups 的数据。
+            function onEmptyDelTrash() {
+                let groupCount = tabGroups.length;
+                if (groupCount === 0) {
+                    return;
+                }
+                let tabCount = 0;
+                for (let gi = 0; gi < tabGroups.length; gi += 1) {
+                    if (tabGroups[gi] && Array.isArray(tabGroups[gi].tabs)) {
+                        tabCount += tabGroups[gi].tabs.length;
+                    }
+                }
+                let message = `${chrome.i18n.getMessage("delEmptyConfirmPrefix")}` + groupCount + `${chrome.i18n.getMessage("group")}` + " / " + tabCount + `${chrome.i18n.getMessage("tabsNo")}` + `${chrome.i18n.getMessage("delEmptyConfirmSuffix")}`;
+                showConfirmation(`${chrome.i18n.getMessage("confirm")}`, message, function () {
+                    saveShardings([], "del");
+                    showAllDelTabs();
+                });
+            }
+
+            // 提示条整行（保持单个 div.alert 作为 #tabGroupsBak 的第一个子元素，与阶段A/B的既有结构一致）：
+            // 文案 + 保留天数下拉；回收站里有数据时再加「清空回收站」按钮，空时不显示按钮
+            function delTipBar() {
+                let children = [
+                    m('span', delAutoCleanTipText()),
+                    m('span.del-retention-setting', [
+                        m('span', `${chrome.i18n.getMessage("delRetentionLabel")}`),
+                        m('select#delRetentionSelect', {
+                            onchange: onDelRetentionChange
+                        }, DEL_RETENTION_OPTIONS.map(function (opt) {
+                            let attrs = {value: String(opt)};
+                            if (opt === delRetentionDays) {
+                                attrs.selected = "selected";
+                            }
+                            let label = opt === 0
+                                ? `${chrome.i18n.getMessage("delRetentionNever")}`
+                                : opt + `${chrome.i18n.getMessage("delRetentionDaysUnit")}`;
+                            return m('option', attrs, label);
+                        }))
+                    ])
+                ];
+                if (tabGroups.length > 0) {
+                    children.push(m('button.btn.btn-danger.btn-sm#emptyDelTrash', {
+                        onclick: onEmptyDelTrash
+                    }, `${chrome.i18n.getMessage("delEmptyTrash")}`));
+                }
+                return m('div.alert.alert-info', {style: "text-align:center"}, children);
+            }
+
+            // 每组日期旁的剩余天数节点（A2补完）：纯函数算出还剩几天；
+            // 返回 null（永久保留 / 还没有 deletedAt）时返回空字符串，视图里就不显示这一行
+            function delRemainingNode(deletedAt) {
+                let remaining = delGroupRemainingDays(deletedAt, delRetentionDays, Date.now());
+                if (remaining === null) {
+                    return "";
+                }
+                return m('span.del-remaining-days', `${chrome.i18n.getMessage("delRemainingPrefix")}` + remaining + `${chrome.i18n.getMessage("delRemainingSuffix")}`);
+            }
 
             function saveTabGroups(json) {
                 saveShardings(json, "del");
@@ -2483,6 +3499,8 @@ https://www.google.com | Google
                 this.isLock = m.prop(data.isLock);
                 this.groupTitle = m.prop(data.groupTitle)
                 this.isPined = m.prop(data.isPined)
+                // 回收站的删除时间（A2补完）：用来算每组还剩多少天被自动删除；旧组没有此字段时为 undefined，不显示剩余天数
+                this.deletedAt = m.prop(data.deletedAt)
             };
 
             // alias for Array
@@ -2506,6 +3524,10 @@ https://www.google.com | Google
                     vm.recoverGroup = function (groupIndex) {
                         // remove from localStorage
                         let defaultTabGroup = tabGroups.splice(groupIndex, 1);
+                        // 恢复回正常列表后，就不再需要回收站的删除时间了
+                        if (defaultTabGroup[0]) {
+                            delete defaultTabGroup[0].deletedAt;
+                        }
                         // save
                         saveTabGroups(tabGroups);
                         saveDefaultTabGroups(defaultTabGroup[0])
@@ -2597,10 +3619,10 @@ https://www.google.com | Google
 
             tabs.view = function () {
                 if (tabs.vm.list.length === 0) {
-                    return m('div', [m('div.jumbotron', [m('div', {style: "text-align:center; margin-bottom:50px"}, `${chrome.i18n.getMessage("noDelTabs")}`)])])
+                    return m('div', [delTipBar(), m('div.jumbotron', [m('div', {style: "text-align:center; margin-bottom:50px"}, `${chrome.i18n.getMessage("noDelTabs")}`)])])
                 }
                 // foreach tab group
-                return tabs.vm.list.map(function (group, i) {
+                return [delTipBar()].concat(tabs.vm.list.map(function (group, i) {
                     // console.log(tabs.vm.list);
                     // console.log(group.tabs());
                     // console.log(i);
@@ -2637,97 +3659,105 @@ https://www.google.com | Google
                     }, [m('div.group-title', [m('img' + lockImgClass, {
                         src: "/images/lock.png"
                     }), m('span' + deleteLinkClass, {
-                        onclick: function () {
+                        onclick: function (e) {
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
                             if (isLock) {
                                 showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("cannotDelete")}`)
                             } else {
                                 showConfirmation(`${chrome.i18n.getMessage("confirm")}`, `${chrome.i18n.getMessage("confirmationDel")}`, function () {
-                                    tabs.vm.rmGroup(i);
+                                    tabs.vm.rmGroup(ci);
                                 });
                             }
                         }
                     }), m('img' + pinImgClass, {
                         src: "/images/pin.png"
                     }), ' ', m('span.group-amount', {
-                        onclick: function () {
-                            $("#del_tabs_" + i).slideToggle();
+                        onclick: function (e) {
+                            $("#del_tabs_" + currentGroupIndex((e && e.currentTarget) || this, i)).slideToggle();
                         }
                     }, group.tabs().length + `${chrome.i18n.getMessage("tabsNo")}`), ' ', m('span.group-name', {
-                        id: "del_groupTitle" + i, onclick: function () {
-                            let val = $("#del_groupTitle" + i).html();
-                            $("#del_groupTitle" + i).slideToggle(100);
-                            $("#del_groupTitleInput" + i).slideToggle(1000);
+                        id: "del_groupTitle" + i, onclick: function (e) {
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                            let val = $("#del_groupTitle" + ci).html();
+                            $("#del_groupTitle" + ci).slideToggle(100);
+                            $("#del_groupTitleInput" + ci).slideToggle(1000);
                             setTimeout(function () {
-                                $("#del_groupTitleInput" + i).focus();
+                                $("#del_groupTitleInput" + ci).focus();
                             }, 100);
-                            $("#del_groupTitleInput" + i).val(val)
+                            $("#del_groupTitleInput" + ci).val(val)
                         }
                     }, groupTitle), ' ', m('input.group-title-input', {
-                        id: "del_groupTitleInput" + i, style: "display:none", onchange: function () {
-                            let val = $("#del_groupTitleInput" + i).val()
-                            $("#del_groupTitle" + i).html(val)
-                            $("#del_groupTitle" + i).slideToggle(1000);
-                            $("#del_groupTitleInput" + i).slideToggle(100);
-                            tabs.vm.updateGroup(i, {groupTitle: val})
-                        }, onblur: function () {
-                            let val = $("#del_groupTitleInput" + i).val()
-                            $("#del_groupTitle" + i).html(val)
-                            $("#del_groupTitle" + i).slideToggle(1000);
-                            $("#del_groupTitleInput" + i).slideToggle(100);
-                            tabs.vm.updateGroup(i, {groupTitle: val})
+                        id: "del_groupTitleInput" + i, style: "display:none", onchange: function (e) {
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                            let val = $("#del_groupTitleInput" + ci).val()
+                            $("#del_groupTitle" + ci).html(val)
+                            $("#del_groupTitle" + ci).slideToggle(1000);
+                            $("#del_groupTitleInput" + ci).slideToggle(100);
+                            tabs.vm.updateGroup(ci, {groupTitle: val})
+                        }, onblur: function (e) {
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                            let val = $("#del_groupTitleInput" + ci).val()
+                            $("#del_groupTitle" + ci).html(val)
+                            $("#del_groupTitle" + ci).slideToggle(1000);
+                            $("#del_groupTitleInput" + ci).slideToggle(100);
+                            tabs.vm.updateGroup(ci, {groupTitle: val})
                         }
-                    }), m('span.group-date', moment(group.date()).format('YYYY-MM-DD HH:mm:ss')), ' ', m('span.restore-all', {
-                        onclick: function () {
+                    }), m('span.group-date', moment(group.date()).format('YYYY-MM-DD HH:mm:ss')), ' ', delRemainingNode(group.deletedAt()), ' ', m('span.restore-all', {
+                        onclick: function (e) {
                             let j;
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
 
                             // reason this goes first and not after is because it doesn't work otherwise
                             // I imagine it's because you changed tab and stuff
                             if (opts.deleteTabOnOpen === 'yes') {
                                 if (!isLock) {
-                                    tabs.vm.rmGroup(i);
+                                    tabs.vm.rmGroup(ci);
                                 }
                             }
                             for (j = 0; j < group.tabs().length; j += 1) {
-                                chrome.tabs.create({
-                                    url: group.tabs()[j].url
-                                });
+                                // 休眠打开开关开时以休眠方式打开（阶段D）；关时与原行为完全一致。
+                                // 上面的 deleteTabOnOpen 删除/保留语义不变，休眠只改变打开方式
+                                openRestoredTab(group.tabs()[j].url, restoreDiscarded);
                             }
                         }
                     }, `${chrome.i18n.getMessage("restoreGroup")}`), m('span.delete-all', {
-                        onclick: function () {
+                        onclick: function (e) {
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
                             if (isLock) {
                                 showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("cannotDelete")}`)
                             } else {
                                 showConfirmation(`${chrome.i18n.getMessage("confirm")}`, `${chrome.i18n.getMessage("confirmationDel")}`, function () {
-                                    tabs.vm.rmGroup(i);
+                                    tabs.vm.rmGroup(ci);
                                 });
                             }
                         }
                     }, `${chrome.i18n.getMessage("deleteAll")}`), m('span.about-lock', {
-                        onclick: function () {
-                            tabs.vm.updateGroup(i, {isLock: !isLock})
+                        onclick: function (e) {
+                            tabs.vm.updateGroup(currentGroupIndex((e && e.currentTarget) || this, i), {isLock: !isLock})
                         }
                     }, lockStatus), m('span.about-top', {
-                        onclick: function () {
-                            tabs.vm.updateGroup(i, {toTop: !isPined})
+                        onclick: function (e) {
+                            tabs.vm.updateGroup(currentGroupIndex((e && e.currentTarget) || this, i), {toTop: !isPined})
                         }
                     }, pinStatus), m('span.about-name', {
-                        onclick: function () {
-                            let val = $("#del_groupTitle" + i).html();
-                            $("#del_groupTitle" + i).slideToggle(100);
-                            $("#del_groupTitleInput" + i).slideToggle(1000);
+                        onclick: function (e) {
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                            let val = $("#del_groupTitle" + ci).html();
+                            $("#del_groupTitle" + ci).slideToggle(100);
+                            $("#del_groupTitleInput" + ci).slideToggle(1000);
                             setTimeout(function () {
-                                $("#del_groupTitleInput" + i).focus();
+                                $("#del_groupTitleInput" + ci).focus();
                             }, 100);
-                            $("#del_groupTitleInput" + i).val(val)
+                            $("#del_groupTitleInput" + ci).val(val)
                         }
                     }, `${chrome.i18n.getMessage("nameThis")}`), m('span.about-recover', {
-                        onclick: function () {
+                        onclick: function (e) {
+                            let ci = currentGroupIndex((e && e.currentTarget) || this, i);
                             if (isLock) {
                                 showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("cannotRecover")}`)
                             } else {
                                 showConfirmation(`${chrome.i18n.getMessage("confirm")}`, `${chrome.i18n.getMessage("confirmationRecover")}`, function () {
-                                    tabs.vm.recoverGroup(i);
+                                    tabs.vm.recoverGroup(ci);
                                 });
                             }
                         }
@@ -2736,18 +3766,22 @@ https://www.google.com | Google
                             id: "del_tabs_" + i
                         }, group.tabs().map(function (tab, ii) {
                             return m('li.li-hover.li-standard.strikethrough', [m('span' + deleteLinkClass, {
-                                onclick: function () {
+                                onclick: function (e) {
+                                    let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                                    let cii = currentTabIndex((e && e.currentTarget) || this, ii);
                                     if (isLock) {
                                         showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("cannotDelete")}`)
                                     } else {
-                                        tabs.vm.rmTab(i, ii);
+                                        tabs.vm.rmTab(ci, cii);
                                     }
                                 }
                             }), m('span.link', {
-                                title: tab.title + "\n" + tab.url, onclick: function () {
+                                title: tab.title + "\n" + tab.url, onclick: function (e) {
+                                    let ci = currentGroupIndex((e && e.currentTarget) || this, i);
+                                    let cii = currentTabIndex((e && e.currentTarget) || this, ii);
                                     if (opts.deleteTabOnOpen === 'yes') {
                                         if (!isLock) {
-                                            tabs.vm.rmTab(i, ii);
+                                            tabs.vm.rmTab(ci, cii);
                                         }
                                     }
                                     chrome.tabs.create({
@@ -2756,62 +3790,62 @@ https://www.google.com | Google
                                 }
                             }, tab.title)]);
                         }))]);
-                });
+                }));
             };
 
 
             // init the app
             m.module(document.getElementById('tabGroupsBak'), {controller: tabs.controller, view: tabs.view});
 
+            // 保留天数下拉的当前值兜底（A2补完）：mithril 对 option 的 selected 属性处理不完全可靠，再按设置值设一次
+            let delRetentionSelectEl = document.getElementById('delRetentionSelect');
+            if (delRetentionSelectEl) {
+                delRetentionSelectEl.value = String(delRetentionDays);
+            }
+
+            // 重建 Sortable 前先销毁上一轮的实例并清空数组，避免实例叠加泄漏、越拖越卡（阶段B）
+            if (sortableDelTitle) {
+                sortableDelTitle.destroy();
+                sortableDelTitle = undefined;
+            }
+            for (let si = 0; si < sortableDelTabList.length; si += 1) {
+                sortableDelTabList[si].destroy();
+            }
+            sortableDelTabList.length = 0;
+
             // 以下是超级拖曳的相关代码
             if (storage.dragType === "dragTitle") {
-                if (sortableDelTabList.length > 0) {
-                    let j;
-                    for (j = 0; j < sortableDelTabList.length; j += 1) {
-                        sortableDelTabList[j].option("disabled", true);
-                    }
-                }
-                if (typeof (sortableDelTitle) != "undefined") {
-                    sortableDelTitle.option("disabled", false);
-                } else {
-                    sortableDelTitle = Sortable.create(document.getElementById("tabGroupsBak"), {
+                sortableDelTitle = Sortable.create(document.getElementById("tabGroupsBak"), {
                         group: {
                             name: "tabGroupsBak", pull: false, put: false
-                        }, scroll: true, easing: "cubic-bezier(1, 0, 0, 1)", animation: 150, //动画参数
+                        }, scroll: true, easing: "cubic-bezier(1, 0, 0, 1)", animation: 100, //动画参数
+                        // #tabGroupsBak 的第一个子元素是提示条 div.alert，不是标签组。
+                        // Sortable 默认 draggable 是 ">*"，会把提示条也算进 oldIndex/newIndex 和
+                        // oldDraggableIndex/newDraggableIndex，序号比纯组序号大 1，moveGroup 会
+                        // 拖错组甚至把 undefined 写进数据（阶段E实测确认）。这里把 draggable
+                        // 限定为 .tabs，再改用 DraggableIndex，序号才是纯组序号；提示条同时也不再能被拖动。
+                        draggable: ".tabs",
                         ghostClass: 'ghost', filter: '.filtered', onEnd: function (evt) { //拖拽完毕之后发生该事件
-                            // console.log(evt)
-                            // console.log(evt.item);
-                            // console.log(evt.to);
-                            // console.log(evt.from);
-                            // console.log(evt.oldIndex);
-                            // console.log(evt.newIndex);
-                            // console.log(evt.oldDraggableIndex);
-                            // console.log(evt.newDraggableIndex);
-                            tabs.vm.moveGroup(evt.oldIndex, evt.newIndex);
-                            showAllDelTabs();
+                            tabs.vm.moveGroup(evt.oldDraggableIndex, evt.newDraggableIndex);
+                            // 同步 mithril 的 vm.list 顺序：点击等事件后 mithril 会按 vm.list 做 diff 重绘，不同步会把顺序画回拖动前
+                            let movedGroup = tabs.vm.list.splice(evt.oldDraggableIndex, 1)[0];
+                            if (movedGroup) {
+                                tabs.vm.list.splice(evt.newDraggableIndex, 0, movedGroup);
+                            }
+                            // 不再全量重渲染（Sortable 已把 DOM 节点移到正确位置），只同步写死在 DOM 上的序号/计数
+                            syncDragDomOrder("tabGroupsBak", "del_");
                         }
                     });
-                }
 
             }
 
             if (storage.dragType === "dragUrls") {
-                if (sortableDelTabList.length > 0) {
-                    let j;
-                    for (j = 0; j < sortableDelTabList.length; j += 1) {
-                        sortableDelTabList[j].option("disabled", false);
-                    }
-                }
                 let j;
-                if (typeof (sortableDelTitle) != "undefined") {
-                    sortableDelTitle.option("disabled", true);
-                }
-                sortableDelTabList.length = 0;
                 for (j = 0; j < del_bridge.length; j += 1) {
                     let sortableTab = Sortable.create(document.getElementById("del_tabs_" + j), {
                         group: {
                             name: "tabs", pull: true, put: true
-                        }, easing: "cubic-bezier(1, 0, 0, 1)", scroll: true, swapThreshold: 0.65, animation: 150, //动画参数
+                        }, easing: "cubic-bezier(1, 0, 0, 1)", scroll: true, swapThreshold: 0.65, animation: 100, //动画参数
                         filter: '.filtered', onEnd: function (evt) {
                             // console.log(evt)
                             // console.log(evt.item);
@@ -2823,7 +3857,8 @@ https://www.google.com | Google
                             // console.log(evt.newDraggableIndex);
                             // console.log("从" + evt.from.parentNode.id + "的" + evt.oldIndex + "到" + evt.to.parentNode.id + "的" + evt.newIndex)
                             tabs.vm.moveTab(evt.from.parentNode.id, evt.oldIndex, evt.to.parentNode.id, evt.newIndex)
-                            showAllDelTabs();
+                            // 标签数据数组与 vm.list 里组对象的 tabs 是同一引用，moveTab 已同步；不再全量重渲染，只同步 DOM 上的序号/计数
+                            syncDragDomOrder("tabGroupsBak", "del_");
                         }
                     })
                     sortableDelTabList.push(sortableTab);

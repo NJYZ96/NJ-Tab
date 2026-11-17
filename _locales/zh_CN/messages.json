@@ -77,9 +77,6 @@
 	"dragTabs": {
 		"message": "是否拖曳标签"
 	},
-	"dragOpenTranslate": {
-		"message": "是否划词翻译"
-	},
 	"pushToGithubGist": {
 		"message": "推送到GitHub的gist"
 	},
@@ -422,9 +419,6 @@
 	"contract": {
 		"message": "有问题可直接联系微信：scoful 请注明来处和来意哦~"
 	},
-	"donate": {
-		"message": "多谢投喂"
-	},
 	"cannotDelete": {
 		"message": "锁定状态下不能删除！"
 	},
@@ -457,5 +451,146 @@
 	},
 	"noDelTabs": {
 		"message": "回收站空空如也！"
+	},
+	"delAutoCleanTipPrefix": {
+		"message": "回收站里的标签会在删除 "
+	},
+	"delAutoCleanTipSuffix": {
+		"message": " 天后自动彻底删除"
+	},
+	"delAutoCleanForeverTip": {
+		"message": "回收站里的标签不会自动删除，会一直保留，直到你手动删除"
+	},
+	"delRetentionLabel": {
+		"message": "保留时间："
+	},
+	"delRetentionDaysUnit": {
+		"message": "天"
+	},
+	"delRetentionNever": {
+		"message": "不自动清理（永久保留）"
+	},
+	"delRemainingPrefix": {
+		"message": "还剩 "
+	},
+	"delRemainingSuffix": {
+		"message": " 天自动删除"
+	},
+	"delEmptyTrash": {
+		"message": "清空回收站"
+	},
+	"delEmptyConfirmPrefix": {
+		"message": "将彻底删除回收站里的全部 "
+	},
+	"delEmptyConfirmSuffix": {
+		"message": "，清空后无法恢复，确定要清空吗？"
+	},
+	"themeMode": {
+		"message": "主题"
+	},
+	"themeLight": {
+		"message": "浅色"
+	},
+	"themeDark": {
+		"message": "深色"
+	},
+	"themeAuto": {
+		"message": "跟随系统"
+	},
+	"exportHtmlFile": {
+		"message": "导出为网页文件"
+	},
+	"exportBackupFile": {
+		"message": "导出完整备份"
+	},
+	"exportFileTip": {
+		"message": "网页文件可以直接双击打开查看、点开里面的链接；完整备份文件包含全部信息，可以用来恢复数据。"
+	},
+	"importBackupFile": {
+		"message": "从备份文件导入"
+	},
+	"importBackupTip": {
+		"message": "选择之前用“导出完整备份”保存的 .json 文件。导入是追加合并：不会覆盖现有标签，备份里的收集时间等信息都会原样保留。"
+	},
+	"backupInvalid": {
+		"message": "这个备份文件格式不正确，没有导入任何数据。请确认选的是本插件“导出完整备份”生成的文件。"
+	},
+	"backupImportConfirm": {
+		"message": "确定要导入这个备份吗？备份里的标签会追加到现有标签后面，不会覆盖现有数据。"
+	},
+	"backupImportSuccess": {
+		"message": "导入完成，页面将刷新。"
+	},
+	"htmlExportTitle": {
+		"message": "N-Tab 导出的标签"
+	},
+	"htmlExportedAt": {
+		"message": "导出时间"
+	},
+	"htmlLocked": {
+		"message": "已锁定"
+	},
+	"htmlPinned": {
+		"message": "已置顶"
+	},
+	"webdavTitle": {
+		"message": "WebDAV 备份（手动同步）"
+	},
+	"webdavUrl": {
+		"message": "服务器地址"
+	},
+	"webdavUser": {
+		"message": "账号"
+	},
+	"webdavPass": {
+		"message": "密码"
+	},
+	"webdavFile": {
+		"message": "备份文件名"
+	},
+	"webdavPassTip": {
+		"message": "提示：密码只保存在你这台电脑的浏览器里，只会在连接你的 WebDAV 服务器时用来登录，不会发到其他地方。填好地址、账号、密码后，先点下面的“保存配置”，然后就能上传或恢复了。"
+	},
+	"webdavUpload": {
+		"message": "上传备份到 WebDAV"
+	},
+	"webdavRestore": {
+		"message": "从 WebDAV 恢复"
+	},
+	"webdavConfigMissing": {
+		"message": "请先填写 WebDAV 服务器地址（填好后点保存配置）。"
+	},
+	"webdavUploadSuccess": {
+		"message": "上传成功，备份已经存到 WebDAV 了。"
+	},
+	"webdavUploadFailed": {
+		"message": "上传失败，本地数据没有变化。请检查服务器地址、账号密码和网络后再试。详情："
+	},
+	"webdavRestoreConfirm": {
+		"message": "恢复会用 WebDAV 上的备份替换现在的全部标签和回收站内容。恢复前会自动把现在的数据在本机存一份快照，万一恢复错了还能找回。确定要恢复吗？"
+	},
+	"webdavRestoreSuccess": {
+		"message": "恢复完成，页面将刷新。"
+	},
+	"webdavRestoreFailed": {
+		"message": "恢复失败，现在的本地数据没有被改动。详情："
+	},
+	"searchPlaceholder": {
+		"message": "搜索：输入标签标题、网址或组名"
+	},
+	"searchResults": {
+		"message": "找到："
+	},
+	"searchNoResults": {
+		"message": "没有找到匹配的标签"
+	},
+	"groupNote": {
+		"message": "备注"
+	},
+	"restoreDiscarded": {
+		"message": "恢复一组标签时先休眠打开（点开才加载，省内存）"
+	},
+	"restoreDiscardedEnable": {
+		"message": "启用"
 	}
 }

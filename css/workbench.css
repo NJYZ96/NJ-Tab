@@ -2,6 +2,74 @@
     text-shadow: transparent 0 0 0, rgba(0, 0, 0, 0.68) 0 0 0 !important;
 }
 
+/* ===== 主题配色变量（阶段B：暗黑模式） =====
+   浅色为 :root 默认值；深色由 workbench.js / workbench.html 内联脚本
+   给 <html> 设置 data-theme="dark" 后整套切换。 */
+:root {
+    --bg-color: #ffffff;
+    --text-color: #333333;
+    --muted-text-color: #777777;
+    --card-bg: #ffffff;
+    --border-color: #dddddd;
+    --link-color: #234da7;
+    --hover-bg: #f0f0f0;
+    --chip-bg: #eeeeee;
+    --input-bg: #ffffff;
+    --input-text: #333333;
+    --input-border: #cccccc;
+    --navbar-bg: #f8f8f8;
+    --navbar-text: #777777;
+    --navbar-active-text: #555555;
+    --navbar-border: #e7e7e7;
+    --dropdown-bg: #ffffff;
+    --dropdown-hover-bg: #f5f5f5;
+    --jumbotron-bg: #eeeeee;
+    --modal-bg: #ffffff;
+    --alert-info-bg: #d9edf7;
+    --alert-info-text: #31708f;
+    --alert-info-border: #bce8f1;
+    --ghost-bg: #C8EBFB;
+}
+
+html[data-theme="dark"] {
+    --bg-color: #1e1f24;
+    --text-color: #e8e8e8;
+    --muted-text-color: #a3a3a3;
+    --card-bg: #26272d;
+    --border-color: #41434b;
+    --link-color: #8db4f2;
+    --hover-bg: #303138;
+    --chip-bg: #3a3b42;
+    --input-bg: #2a2b31;
+    --input-text: #e8e8e8;
+    --input-border: #4c4e57;
+    --navbar-bg: #26272d;
+    --navbar-text: #c9c9c9;
+    --navbar-active-text: #ffffff;
+    --navbar-border: #41434b;
+    --dropdown-bg: #26272d;
+    --dropdown-hover-bg: #35363e;
+    --jumbotron-bg: #26272d;
+    --modal-bg: #26272d;
+    --alert-info-bg: #1f3a4d;
+    --alert-info-text: #a8d3ea;
+    --alert-info-border: #2c546e;
+    --ghost-bg: #33566e;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+}
+
+a {
+    color: var(--link-color);
+}
+
+hr {
+    border-top-color: var(--border-color);
+}
+
 .fixed-bottom-right {
     position: fixed;
     bottom: 20px;
@@ -22,6 +90,25 @@
     opacity: 0.7;
 }
 
+/* 回收站每组剩余天数：日期旁小号灰字（A2补完） */
+.del-remaining-days {
+    color: var(--muted-text-color);
+    font-size: 85%;
+}
+
+/* 回收站提示条里的保留天数设置与清空按钮（A2补完） */
+.del-retention-setting {
+    margin-left: 16px;
+}
+
+.del-retention-setting select {
+    margin-left: 4px;
+}
+
+#emptyDelTrash {
+    margin-left: 16px;
+}
+
 .group-title {
     margin-bottom: 10px;
 }
@@ -29,66 +116,132 @@
 .restore-all {
     margin-left: 20px;
     cursor: pointer;
-    color: #234da7;
+    color: var(--link-color);
 }
 
 .restore-all:hover {
-    color: #234da7;
+    color: var(--link-color);
     text-decoration: underline;
 }
 
 .delete-all {
     margin-left: 20px;
     cursor: pointer;
-    color: #234da7;
+    color: var(--link-color);
 }
 
 .delete-all:hover {
-    color: #234da7;
+    color: var(--link-color);
     text-decoration: underline;
 }
 
 .about-lock {
     margin-left: 20px;
     cursor: pointer;
-    color: #234da7;
+    color: var(--link-color);
 }
 
 .about-lock:hover {
-    color: #234da7;
+    color: var(--link-color);
     text-decoration: underline;
 }
 
 .about-top {
     margin-left: 20px;
     cursor: pointer;
-    color: #234da7;
+    color: var(--link-color);
 }
 
 .about-top:hover {
-    color: #234da7;
+    color: var(--link-color);
     text-decoration: underline;
 }
 
 .about-name {
     margin-left: 20px;
     cursor: pointer;
-    color: #234da7;
+    color: var(--link-color);
 }
 
 .about-name:hover {
-    color: #234da7;
+    color: var(--link-color);
     text-decoration: underline;
+}
+
+.about-note {
+    margin-left: 20px;
+    cursor: pointer;
+    color: var(--link-color);
+}
+
+.about-note:hover {
+    color: var(--link-color);
+    text-decoration: underline;
+}
+
+/* ===== 阶段D：全局搜索 + 标签组备注 ===== */
+#searchArea {
+    margin-bottom: 15px;
+}
+
+#searchInput {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    font-size: 110%;
+    background-color: var(--input-bg);
+    color: var(--input-text);
+    border: 1px solid var(--input-border);
+    border-radius: 4px;
+}
+
+.search-result-count {
+    font-size: 110%;
+    font-weight: bold;
+    margin: 10px 0;
+}
+
+.search-no-results {
+    color: var(--muted-text-color);
+    margin: 10px 0;
+}
+
+.search-result-group {
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
+
+/* 组备注：组标题下方小号灰字显示全文 */
+.group-note {
+    color: var(--muted-text-color);
+    font-size: 85%;
+    cursor: pointer;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.group-note-row {
+    margin: 2px 0 6px 0;
+}
+
+.group-note-input {
+    width: 320px;
+    max-width: 70%;
+    overflow: hidden;
+    border: none;
+    margin-right: 5px;
+    background-color: transparent;
+    color: var(--text-color);
 }
 
 .about-recover {
     margin-left: 20px;
     cursor: pointer;
-    color: #234da7;
+    color: var(--link-color);
 }
 
 .about-recover:hover {
-    color: #234da7;
+    color: var(--link-color);
     text-decoration: underline;
 }
 
@@ -98,7 +251,7 @@ ul {
 
 .li-hover:hover {
     cursor: pointer;
-    background: #f0f0f0;
+    background: var(--hover-bg);
     padding-bottom: 3px;
 }
 
@@ -113,7 +266,7 @@ ul {
 .delete-link {
     font-size: 70%;
     font-weight: bold;
-    background: #eee;
+    background: var(--chip-bg);
     color: white;
     display: inline-block;
     border-radius: 1em;
@@ -139,7 +292,7 @@ ul {
 }
 
 .link, .link:visited {
-    color: #234da7;
+    color: var(--link-color);
     text-decoration: none;
     padding: .2em;
     font-size: 85%;
@@ -156,7 +309,7 @@ ul {
 
 .ghost {
     opacity: .5;
-    background: #C8EBFB;
+    background: var(--ghost-bg);
 }
 
 .tabs {
@@ -248,4 +401,232 @@ ul {
     /*background-image: linear-gradient(to bottom, #dff0d8, #70a800);*/
     box-shadow: 0 0 3px rgba(0, 0, 0, .2);
     transition: top .4s;
+}
+
+/* ===== 宽屏流式布局（阶段B：带鱼屏适配） =====
+   Bootstrap .container 在大屏上固定 1170px，超宽屏两侧大片留白。
+   这里只覆盖 #body（内容主体）和顶部导航的 .container：
+   中等屏幕起改为按视口比例的流式宽度，屏幕越宽上限越大；
+   <=1199px 不覆盖，保持 Bootstrap 原有观感不变。 */
+@media (min-width: 1200px) {
+    #body.container,
+    .navbar > .container {
+        width: 96%;
+        max-width: 1920px;
+    }
+}
+
+@media (min-width: 2000px) {
+    #body.container,
+    .navbar > .container {
+        width: 97%;
+        max-width: 2560px;
+    }
+}
+
+@media (min-width: 3000px) {
+    #body.container,
+    .navbar > .container {
+        width: 98%;
+        max-width: 3400px;
+    }
+}
+
+/* 超宽屏（>=2000px）标签组两列排布：
+   #tabGroups / #tabGroupsBak 的直接子元素 div.tabs 用 flex 横向换行，每组约占一半宽。
+   不使用 CSS order、不改 DOM 顺序，视觉顺序（从左到右、从上到下）与 DOM 顺序一致，
+   因此 Sortable 按 DOM 顺序算出的组索引语义不变。
+   回收站列表第一项是提示条（.alert），让它独占一整行；空状态的大块提示（.jumbotron 父级）同理。 */
+@media (min-width: 2000px) {
+    #tabGroups,
+    #tabGroupsBak {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        column-gap: 2%;
+    }
+
+    #tabGroups > .tabs,
+    #tabGroupsBak > .tabs {
+        flex: 0 0 49%;
+        max-width: 49%;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
+    #tabGroupsBak > .alert {
+        flex: 0 0 100%;
+    }
+
+    #tabGroups > div:not(.tabs),
+    #tabGroupsBak > div:not(.tabs):not(.alert) {
+        flex: 0 0 100%;
+    }
+}
+
+/* ===== 深色主题下 Bootstrap 组件外观覆盖（阶段B） =====
+   workbench.css 在 bootstrap.min.css 之后加载，且选择器带 html[data-theme="dark"] 前缀，
+   优先级高于 Bootstrap 默认规则，只在深色时生效，浅色完全保持原样。 */
+html[data-theme="dark"] body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+}
+
+html[data-theme="dark"] .navbar-default {
+    background-color: var(--navbar-bg);
+    border-color: var(--navbar-border);
+}
+
+html[data-theme="dark"] .navbar-default .navbar-brand,
+html[data-theme="dark"] .navbar-default .navbar-nav > li > a {
+    color: var(--navbar-text);
+}
+
+html[data-theme="dark"] .navbar-default .navbar-brand:hover,
+html[data-theme="dark"] .navbar-default .navbar-nav > li > a:hover,
+html[data-theme="dark"] .navbar-default .navbar-nav > li > a:focus {
+    color: var(--navbar-active-text);
+    background-color: transparent;
+}
+
+html[data-theme="dark"] .navbar-default .navbar-nav > .active > a,
+html[data-theme="dark"] .navbar-default .navbar-nav > .active > a:hover,
+html[data-theme="dark"] .navbar-default .navbar-nav > .open > a,
+html[data-theme="dark"] .navbar-default .navbar-nav > .open > a:hover {
+    color: var(--navbar-active-text);
+    background-color: var(--hover-bg);
+}
+
+html[data-theme="dark"] .navbar-default .navbar-toggle {
+    border-color: var(--navbar-border);
+}
+
+html[data-theme="dark"] .navbar-default .navbar-toggle .icon-bar {
+    background-color: var(--navbar-text);
+}
+
+html[data-theme="dark"] .navbar-default .navbar-collapse,
+html[data-theme="dark"] .navbar-default .navbar-form {
+    border-color: var(--navbar-border);
+}
+
+html[data-theme="dark"] .dropdown-menu {
+    background-color: var(--dropdown-bg);
+    border-color: var(--border-color);
+}
+
+html[data-theme="dark"] .dropdown-menu > li > a {
+    color: var(--text-color);
+}
+
+html[data-theme="dark"] .dropdown-menu > li > a:hover,
+html[data-theme="dark"] .dropdown-menu > li > a:focus {
+    color: var(--text-color);
+    background-color: var(--dropdown-hover-bg);
+}
+
+html[data-theme="dark"] .dropdown-menu .divider {
+    background-color: var(--border-color);
+}
+
+html[data-theme="dark"] .btn-default,
+html[data-theme="dark"] .btn-secondary {
+    color: var(--text-color);
+    background-color: var(--card-bg);
+    border-color: var(--input-border);
+}
+
+html[data-theme="dark"] .btn-default:hover,
+html[data-theme="dark"] .btn-default:focus,
+html[data-theme="dark"] .btn-secondary:hover,
+html[data-theme="dark"] .btn-secondary:focus {
+    color: var(--text-color);
+    background-color: var(--hover-bg);
+    border-color: var(--input-border);
+}
+
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] input[type="text"],
+html[data-theme="dark"] input[type="password"],
+html[data-theme="dark"] input[type="url"],
+html[data-theme="dark"] select,
+html[data-theme="dark"] .form-control {
+    background-color: var(--input-bg);
+    color: var(--input-text);
+    border-color: var(--input-border);
+}
+
+html[data-theme="dark"] .form-control:focus {
+    border-color: var(--link-color);
+}
+
+html[data-theme="dark"] .input-group-addon {
+    background-color: var(--hover-bg);
+    color: var(--text-color);
+    border-color: var(--input-border);
+}
+
+html[data-theme="dark"] .group-title-input {
+    background-color: transparent;
+    color: var(--text-color);
+}
+
+html[data-theme="dark"] .jumbotron {
+    background-color: var(--jumbotron-bg);
+    color: var(--text-color);
+}
+
+html[data-theme="dark"] .alert-info {
+    background-color: var(--alert-info-bg);
+    color: var(--alert-info-text);
+    border-color: var(--alert-info-border);
+}
+
+html[data-theme="dark"] .modal-content {
+    background-color: var(--modal-bg);
+    color: var(--text-color);
+    border-color: var(--border-color);
+}
+
+html[data-theme="dark"] .modal-header,
+html[data-theme="dark"] .modal-footer {
+    border-color: var(--border-color);
+}
+
+html[data-theme="dark"] .close {
+    color: var(--text-color);
+    text-shadow: none;
+    opacity: 0.8;
+}
+
+html[data-theme="dark"] .table > thead > tr > th,
+html[data-theme="dark"] .table > tbody > tr > th,
+html[data-theme="dark"] .table > tfoot > tr > th,
+html[data-theme="dark"] .table > thead > tr > td,
+html[data-theme="dark"] .table > tbody > tr > td,
+html[data-theme="dark"] .table > tfoot > tr > td {
+    border-color: var(--border-color);
+}
+
+html[data-theme="dark"] .table-hover > tbody > tr:hover,
+html[data-theme="dark"] .list-group-item {
+    background-color: var(--hover-bg);
+    color: var(--text-color);
+    border-color: var(--border-color);
+}
+
+/* 设置页的 bootstrap-switch 开关：底色跟随主题，避免深色下出现白色块 */
+html[data-theme="dark"] .bootstrap-switch {
+    border-color: var(--input-border);
+}
+
+html[data-theme="dark"] .bootstrap-switch .bootstrap-switch-label {
+    background-color: var(--card-bg);
+    color: var(--text-color);
+}
+
+/* 深色下日期等弱化文字提亮一档，保证可读 */
+html[data-theme="dark"] .group-date {
+    color: var(--muted-text-color);
+    opacity: 1;
 }

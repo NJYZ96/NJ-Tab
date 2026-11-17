@@ -77,9 +77,6 @@
 	"dragTabs": {
 		"message": "Super Drag Tabs"
 	},
-	"dragOpenTranslate": {
-		"message": "Cross Word Translation"
-	},
 	"pushToGithubGist": {
 		"message": "Push To GitHub's gist"
 	},
@@ -422,9 +419,6 @@
 	"contract": {
 		"message": "If you have any questions, you can directly contact WeChat : scoful. Please state your source and purpose~"
 	},
-	"donate": {
-		"message": "Buy Me A Coffee"
-	},
 	"cannotDelete": {
 		"message": "Cannot delete while in locked state."
 	},
@@ -457,5 +451,146 @@
 	},
 	"noDelTabs": {
 		"message": "No tab groups have been deleted yet, or you deleted them all..."
+	},
+	"delAutoCleanTipPrefix": {
+		"message": "Tabs in the recycle bin will be permanently deleted automatically "
+	},
+	"delAutoCleanTipSuffix": {
+		"message": " days after they are deleted."
+	},
+	"delAutoCleanForeverTip": {
+		"message": "Tabs in the recycle bin will not be deleted automatically; they are kept until you delete them manually."
+	},
+	"delRetentionLabel": {
+		"message": "Retention: "
+	},
+	"delRetentionDaysUnit": {
+		"message": " days"
+	},
+	"delRetentionNever": {
+		"message": "Never auto-delete (keep forever)"
+	},
+	"delRemainingPrefix": {
+		"message": "Auto-delete in "
+	},
+	"delRemainingSuffix": {
+		"message": " day(s)"
+	},
+	"delEmptyTrash": {
+		"message": "Empty recycle bin"
+	},
+	"delEmptyConfirmPrefix": {
+		"message": "This will permanently delete all "
+	},
+	"delEmptyConfirmSuffix": {
+		"message": " in the recycle bin. This cannot be undone. Are you sure?"
+	},
+	"themeMode": {
+		"message": "Theme"
+	},
+	"themeLight": {
+		"message": "Light"
+	},
+	"themeDark": {
+		"message": "Dark"
+	},
+	"themeAuto": {
+		"message": "Follow system"
+	},
+	"exportHtmlFile": {
+		"message": "Export as web page file"
+	},
+	"exportBackupFile": {
+		"message": "Export full backup"
+	},
+	"exportFileTip": {
+		"message": "The web page file can be opened directly to view and click the links; the full backup file contains everything and can be used to restore your data."
+	},
+	"importBackupFile": {
+		"message": "Import from backup file"
+	},
+	"importBackupTip": {
+		"message": "Choose a .json file saved earlier with Export full backup. Importing appends and merges: it will not overwrite your existing tabs, and collection times and other info in the backup are kept as they are."
+	},
+	"backupInvalid": {
+		"message": "This backup file is not in the right format, and nothing was imported. Please make sure it is a file created by this extension's Export full backup."
+	},
+	"backupImportConfirm": {
+		"message": "Import this backup? Its tabs will be appended after your existing tabs and will not overwrite any existing data."
+	},
+	"backupImportSuccess": {
+		"message": "Import finished, the page will reload."
+	},
+	"htmlExportTitle": {
+		"message": "Tabs exported from N-Tab"
+	},
+	"htmlExportedAt": {
+		"message": "Exported at"
+	},
+	"htmlLocked": {
+		"message": "Locked"
+	},
+	"htmlPinned": {
+		"message": "Pinned"
+	},
+	"webdavTitle": {
+		"message": "WebDAV backup (manual sync)"
+	},
+	"webdavUrl": {
+		"message": "Server address"
+	},
+	"webdavUser": {
+		"message": "Username"
+	},
+	"webdavPass": {
+		"message": "Password"
+	},
+	"webdavFile": {
+		"message": "Backup file name"
+	},
+	"webdavPassTip": {
+		"message": "Note: your password is only stored in this browser on this computer. It is only used to sign in to your own WebDAV server and is never sent anywhere else. After filling in the address, username and password, click Save options below first, then you can upload or restore."
+	},
+	"webdavUpload": {
+		"message": "Upload backup to WebDAV"
+	},
+	"webdavRestore": {
+		"message": "Restore from WebDAV"
+	},
+	"webdavConfigMissing": {
+		"message": "Please fill in the WebDAV server address first (and click Save options after filling it in)."
+	},
+	"webdavUploadSuccess": {
+		"message": "Upload succeeded, the backup is now stored on WebDAV."
+	},
+	"webdavUploadFailed": {
+		"message": "Upload failed, and your local data was not changed. Please check the server address, username, password and network, then try again. Details:"
+	},
+	"webdavRestoreConfirm": {
+		"message": "Restoring will replace all your current tabs and recycle bin contents with the backup on WebDAV. Before replacing, your current data will automatically be saved as a snapshot on this computer, so you can get it back if anything goes wrong. Are you sure you want to restore?"
+	},
+	"webdavRestoreSuccess": {
+		"message": "Restore finished, the page will reload."
+	},
+	"webdavRestoreFailed": {
+		"message": "Restore failed, and your current local data was not changed. Details:"
+	},
+	"searchPlaceholder": {
+		"message": "Search tab titles, URLs or group names"
+	},
+	"searchResults": {
+		"message": "Found: "
+	},
+	"searchNoResults": {
+		"message": "No matching tabs found"
+	},
+	"groupNote": {
+		"message": "Note"
+	},
+	"restoreDiscarded": {
+		"message": "Open restored tab groups discarded (they only load when clicked, saves memory)"
+	},
+	"restoreDiscardedEnable": {
+		"message": "Enable"
 	}
 }

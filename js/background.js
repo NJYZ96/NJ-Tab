@@ -415,74 +415,9 @@ function setHandleGistStatus(status) {
     chrome.storage.local.set({handleGistStatus: gistStatusMap});
 }
 
-// 判断是否中文
-function isChinese(str) {
-    var reg = /[\u4e00-\u9fa5]/; // 使用Unicode范围匹配中文字符
-    return reg.test(str);
-}
-
-// 判断是否英文
-function isEnglish(str) {
-    var reg = /^[a-zA-Z]+$/; // 匹配纯英文字符
-    return reg.test(str);
-}
-
-// 调用腾讯交互翻译api
-function translateFunc(txt) {
-    console.log("开始翻译！");
-    let source = "en"
-    let target = "zh"
-    if (isChinese(txt)) {
-        source = "zh"
-        target = "en"
-    }
-    if (isEnglish(txt)) {
-        source = "en"
-        target = "zh"
-    }
-    let url = "https://transmart.qq.com/api/imt"
-    let data = JSON.stringify({
-        "header": {
-            "fn": "auto_translation",
-            "session": "",
-            "client_key": "browser-chrome-117.0.0-Windows 10-4daf3e2e-b66e-43a1-944a-a8f6b42c9199-1696226243060",
-            "user": ""
-        }, "type": "plain", "model_category": "normal", "text_domain": "general", "source": {
-            "lang": source, "text_list": [txt]
-        }, "target": {
-            "lang": target
-        }
-    })
-    let myHeaders = new Headers();
-    myHeaders.append("Content-Type", "application/json");
-    let requestOptions = {
-        method: 'POST', headers: myHeaders, body: data,
-    };
-
-    fetch(url, requestOptions)
-        .then(response => response.json())
-        .then(result => {
-            console.log(result.header.ret_code)
-            if (result.header.ret_code) {
-                console.log(result.auto_translation[0]);
-                sendMessageToContentScript("translateResult", result.auto_translation[0]);
-            } else {
-                sendMessageToContentScript("translateResult", "--FAILED--!");
-            }
-        })
-        .catch(error => {
-            console.log('error', error)
-            sendMessageToContentScript("translateResult", "--ERROR,may be lost network--!");
-        });
-}
-
 // 持续监听发送给background的消息
 chrome.runtime.onMessage.addListener(function (req, sender, sendRes) {
     switch (req.action) {
-        case 'translate': // 翻译
-            translateFunc(req.message);
-            sendRes('ok'); // acknowledge
-            break;
         case 'save-all': // 保存所有tab
             if (req.tabsArr.length > 0) {
                 saveTabs(req.tabsArr);
@@ -533,17 +468,6 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendRes) {
             break;
     }
 });
-
-// 向content-script主动发送消息
-function sendMessageToContentScript(action, message) {
-    chrome.tabs.query({active: true, currentWindow: true}, function (res) {
-        chrome.tabs.sendMessage(res[0].id, {action: action, message: message}, function (response) {
-            if (response === 'ok') {
-                console.log("background-->content发送的消息被消费了");
-            }
-        });
-    });
-}
 
 // 生成唯一标识
 // refer: https://gist.github.com/solenoid/1372386
@@ -687,7 +611,14 @@ function dateFormat(fmt, date) {
 }
 
 // 用分片的思路去存storage
+// 注意：保存后要清掉比新数据多出来的旧分片，不然删掉的数据会残留占空间、甚至“复活”；
+// 数据为空时也要真正清空（分片数量写0，并移除所有旧分片）。
 function saveShardings(tabGroup, type) {
+    // 前缀（tabGroups_ 是正常标签，del_tabGroups_ 是回收站）
+    let prefix = "tabGroups_"
+    if (type === "del") {
+        prefix = "del_tabGroups_"
+    }
     let tabGroupStr;
     if (type === "object") {
         tabGroupStr = JSON.stringify(tabGroup);
@@ -696,18 +627,36 @@ function saveShardings(tabGroup, type) {
     } else if (type === "del") {
         tabGroupStr = JSON.stringify(tabGroup);
     }
-    if (tabGroupStr && tabGroupStr !== 'null' && tabGroupStr !== 'undefined') {
+    // 是否为空数据（空数组、空字符串、null、undefined 都算）
+    let isEmpty = (Array.isArray(tabGroup) && tabGroup.length === 0)
+        || !tabGroupStr || tabGroupStr === 'null' || tabGroupStr === 'undefined';
+    // 先查一下旧的分片数量，保存完才知道哪些旧分片是多余的
+    chrome.storage.local.get(prefix + "num", function (items) {
+        let oldNum = 0;
+        if (items && typeof items[prefix + "num"] === 'number') {
+            oldNum = items[prefix + "num"];
+        }
+        if (isEmpty) {
+            // 真正清空：分片数量写0，并移除所有旧分片
+            let emptySlices = {};
+            emptySlices[prefix + "num"] = 0;
+            chrome.storage.local.set(emptySlices, function () {
+                if (oldNum > 0) {
+                    let staleKeys = [];
+                    for (let i = 0; i < oldNum; i++) {
+                        staleKeys.push(prefix + i);
+                    }
+                    chrome.storage.local.remove(staleKeys);
+                }
+            });
+            return;
+        }
         // 字符串有值的逻辑
         let length = tabGroupStr.length;
         let sliceLength = 102400;
         let tabGroupSlices = {}; // 保存分片数据
         let i = 0; // 分片序号
 
-        // 前缀
-        let prefix = "tabGroups_"
-        if (type === "del") {
-            prefix = "del_tabGroups_"
-        }
         // 分片保存数据
         while (length > 0) {
             tabGroupSlices[prefix + i] = tabGroupStr.substr(i * sliceLength, sliceLength);
@@ -718,12 +667,17 @@ function saveShardings(tabGroup, type) {
         // 保存分片数量
         tabGroupSlices[prefix + "num"] = i;
 
-        // 写入Storage
-        chrome.storage.local.set(tabGroupSlices);
-    } else {
-        // 字符串为空或为 null 或 undefined 的逻辑
-        console.log('为空或为null/undefined');
-    }
+        // 写入Storage，写完再清掉多出来的旧分片
+        chrome.storage.local.set(tabGroupSlices, function () {
+            if (oldNum > i) {
+                let staleKeys = [];
+                for (let j = i; j < oldNum; j++) {
+                    staleKeys.push(prefix + j);
+                }
+                chrome.storage.local.remove(staleKeys);
+            }
+        });
+    });
 }
 
 // 获取storage里的标签相关数据

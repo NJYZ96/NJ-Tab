@@ -54,3 +54,28 @@
     background: red;
     cursor: pointer;
 }
+
+/* 阶段B：popup 基础暗黑适配，跟随系统，不提供手动切换开关 */
+@media (prefers-color-scheme: dark) {
+    body {
+        background: #26272d;
+        color: #e8e8e8;
+    }
+
+    .menu-entry {
+        background: #26272d;
+        color: #e8e8e8;
+    }
+
+    .menu-entry:hover {
+        background: #35363e;
+    }
+
+    .row {
+        border-top-color: #41434b;
+    }
+
+    .delete-link {
+        background: #3a3b42;
+    }
+}
