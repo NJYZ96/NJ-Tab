@@ -1986,6 +1986,171 @@ https://www.google.com | Google
         })
     }
 
+    // ===== 密码/token 本机加密（阶段3）=====
+    // 存储格式 {__njEnc:1, iv, ct}（AES-GCM 加密）；密钥单独存 njSecretKeyJwk，只留在本机、与密文分开
+    // 老版本存的明文在首次读到时自动改存为密文（一次性迁移）；密码/token 绝不打印到日志
+    let njKeyPromise = null;
+    let njWebdavPassCache = "";
+
+    function njB64encode(buf) {
+        let bytes = new Uint8Array(buf);
+        let s = "";
+        for (let i = 0; i < bytes.length; i++) { s += String.fromCharCode(bytes[i]); }
+        return btoa(s);
+    }
+
+    function njB64decode(str) {
+        let bin = atob(str);
+        let bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) { bytes[i] = bin.charCodeAt(i); }
+        return bytes;
+    }
+
+    function njGetKey() {
+        if (njKeyPromise) { return njKeyPromise; }
+        njKeyPromise = new Promise(function (resolve, reject) {
+            chrome.storage.local.get("njSecretKeyJwk", function (items) {
+                if (items.njSecretKeyJwk) {
+                    crypto.subtle.importKey("jwk", items.njSecretKeyJwk, {name: "AES-GCM"}, true, ["encrypt", "decrypt"]).then(resolve, reject);
+                } else {
+                    crypto.subtle.generateKey({name: "AES-GCM", length: 256}, true, ["encrypt", "decrypt"]).then(function (key) {
+                        crypto.subtle.exportKey("jwk", key).then(function (jwk) {
+                            chrome.storage.local.set({njSecretKeyJwk: jwk}, function () { resolve(key); });
+                        }, reject);
+                    }, reject);
+                }
+            });
+        });
+        return njKeyPromise;
+    }
+
+    function njEncryptSecret(plain) {
+        return njGetKey().then(function (key) {
+            let iv = crypto.getRandomValues(new Uint8Array(12));
+            return crypto.subtle.encrypt({name: "AES-GCM", iv: iv}, key, new TextEncoder().encode(plain)).then(function (ct) {
+                return {__njEnc: 1, iv: njB64encode(iv), ct: njB64encode(ct)};
+            });
+        });
+    }
+
+    function njIsEncryptedSecret(v) {
+        return !!v && typeof v === "object" && v.__njEnc === 1 && typeof v.iv === "string" && typeof v.ct === "string";
+    }
+
+    // 返回明文：老明文（字符串）原样返回；密文解密；解密失败返回空串
+    function njDecryptSecret(v) {
+        if (v === undefined || v === null || v === "") { return Promise.resolve(""); }
+        if (typeof v === "string") { return Promise.resolve(v); }
+        if (!njIsEncryptedSecret(v)) { return Promise.resolve(""); }
+        return njGetKey().then(function (key) {
+            return crypto.subtle.decrypt({name: "AES-GCM", iv: njB64decode(v.iv)}, key, njB64decode(v.ct)).then(function (buf) {
+                return new TextDecoder().decode(buf);
+            }).catch(function () { return ""; });
+        });
+    }
+
+    // 读一个密钥字段并回调明文；若存的是老明文，顺手改存为密文（一次性迁移）
+    function njLoadSecretField(field, cb) {
+        chrome.storage.local.get(field, function (items) {
+            let v = items[field];
+            if (typeof v === "string" && v !== "") {
+                njEncryptSecret(v).then(function (enc) {
+                    let obj = {};
+                    obj[field] = enc;
+                    chrome.storage.local.set(obj);
+                });
+                cb(v);
+                return;
+            }
+            njDecryptSecret(v).then(function (plain) { cb(plain || ""); });
+        });
+    }
+
+    // 页面内密码输入弹窗（替代原生 prompt 输入 token）：密码样式输入，保存后不回显
+    function showSecretPrompt(title, onSubmit) {
+        let modalHtml = `
+        <div class="modal fade" id="secretPromptModal" tabindex="-1" role="dialog" aria-hidden="true">
+          <div class="modal-dialog" role="document">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title">${title}</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                  <span aria-hidden="true">&times;</span>
+                </button>
+              </div>
+              <div class="modal-body">
+                <p>${chrome.i18n.getMessage("saveTokenKey")}</p>
+                <input type="password" class="form-control" id="njSecretInput" autocomplete="off">
+                <p style="margin-top:10px">${chrome.i18n.getMessage("secretSecurityNote")}</p>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">${chrome.i18n.getMessage("njCancel")}</button>
+                <button type="button" class="btn btn-primary" id="njSecretSaveBtn" disabled>${chrome.i18n.getMessage("njSave")}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+            `;
+
+        let modalContainer = document.createElement('div');
+        modalContainer.innerHTML = modalHtml;
+        document.body.appendChild(modalContainer);
+
+        $('#secretPromptModal').modal('show');
+        $('#secretPromptModal').on('hidden.bs.modal', function () { modalContainer.remove(); });
+
+        $('#njSecretInput').on('input', function () {
+            $('#njSecretSaveBtn').prop('disabled', $(this).val().trim().length === 0);
+        });
+        $('#njSecretInput').on('keydown', function (e) {
+            if (e.key === 'Enter' && !$('#njSecretSaveBtn').prop('disabled')) {
+                $('#njSecretSaveBtn').click();
+            }
+        });
+        $('#njSecretSaveBtn').on('click', function () {
+            let val = $('#njSecretInput').val().trim();
+            $('#secretPromptModal').modal('hide');
+            if (val) { onSubmit(val); }
+        });
+        setTimeout(function () { $('#njSecretInput').focus(); }, 300);
+    }
+
+    // 本地旧数据一次性转换（阶段3）：3.1 的标签组缺 note/deletedAt 字段时补默认值并写回，只加字段不改已有值
+    function njMigrateLocalDataOnce() {
+        chrome.storage.local.get("njDataConverted41", function (items) {
+            if (items.njDataConverted41) { return; }
+            getShardings(function (data) {
+                let changed = false;
+                function fix(list, isDel) {
+                    if (!Array.isArray(list)) { return []; }
+                    return list.map(function (g) {
+                        if (!g || typeof g !== "object") { return g; }
+                        if (g.note === undefined) { g.note = ""; changed = true; }
+                        if (g.deletedAt === undefined) {
+                            g.deletedAt = isDel ? (typeof g.createTime === "number" ? g.createTime : null) : null;
+                            changed = true;
+                        }
+                        return g;
+                    });
+                }
+                let tg = fix(data.tabGroups, false);
+                let dg = fix(data.delTabGroups, true);
+                if (changed && tg.length === (Array.isArray(data.tabGroups) ? data.tabGroups.length : 0)
+                    && dg.length === (Array.isArray(data.delTabGroups) ? data.delTabGroups.length : 0)) {
+                    saveShardings(tg, "object");
+                    saveShardings(dg, "del");
+                }
+                chrome.storage.local.set({njDataConverted41: true});
+            });
+        });
+    }
+
+    // 启动时把 WebDAV 密码解密到内存缓存（老明文会顺手迁移为密文），并做一次本地旧数据转换
+    njLoadSecretField("webdavPass", function (plain) {
+        njWebdavPassCache = plain || "";
+    });
+    njMigrateLocalDataOnce();
+
     // 判断是否已经保存github的Token
     function isStoredGithubTokenLocal(action) {
         console.log("开始检查githubtoken有没有保存");
@@ -1995,21 +2160,23 @@ https://www.google.com | Google
         } else if (action === "pull_github") {
             pullFromGithubGistStatus = `${chrome.i18n.getMessage("startCheckGithubTokenSaved")}`;
         }
-        chrome.storage.local.get("githubGistToken", function (storage) {
-            console.log(storage.githubGistToken);
-            if (storage.githubGistToken) {
-                console.log("githubtoken有保存");
+        // 加密存储：读出并解密（老明文会自动迁移为密文）；token 绝不打印到日志
+        njLoadSecretField("githubGistToken", function (plain) {
+            if (plain) {
                 handleGistLog.push(`${chrome.i18n.getMessage("githubTokenSaved")}`);
-                githubGistToken = storage.githubGistToken;
+                githubGistToken = plain;
                 isStoredGithubGistIdLocal(action);
             } else {
-                console.log("githubtoken没有保存");
                 handleGistLog.push(`${chrome.i18n.getMessage("githubTokenNoSaved")}`);
-                let token = prompt(`${chrome.i18n.getMessage("saveTokenKey")}`, `${chrome.i18n.getMessage("saveTokenValue")}`);
-                chrome.storage.local.set({githubGistToken: token.trim()});
-                console.log("githubtoken保存完毕");
-                handleGistLog.push(`${chrome.i18n.getMessage("githubTokenSaveSuccess")}`)
-                isStoredGithubGistIdLocal(action);
+                showSecretPrompt(`${chrome.i18n.getMessage("githubToken")}`, function (token) {
+                    njEncryptSecret(token).then(function (enc) {
+                        chrome.storage.local.set({githubGistToken: enc}, function () {
+                            githubGistToken = token;
+                            handleGistLog.push(`${chrome.i18n.getMessage("githubTokenSaveSuccess")}`)
+                            isStoredGithubGistIdLocal(action);
+                        });
+                    });
+                });
             }
         });
     }
@@ -2023,21 +2190,23 @@ https://www.google.com | Google
         } else if (action === "pull_gitee") {
             pullFromGiteeGistStatus = `${chrome.i18n.getMessage("startCheckGiteeTokenSaved")}`;
         }
-        chrome.storage.local.get("giteeGistToken", function (storage) {
-            console.log(storage.giteeGistToken);
-            if (storage.giteeGistToken) {
-                console.log("giteetoken有保存");
+        // 加密存储：读出并解密（老明文会自动迁移为密文）；token 绝不打印到日志
+        njLoadSecretField("giteeGistToken", function (plain) {
+            if (plain) {
                 handleGistLog.push(`${chrome.i18n.getMessage("giteeTokenSaved")}`);
-                giteeGistToken = storage.giteeGistToken;
+                giteeGistToken = plain;
                 isStoredGiteeGistIdLocal(action);
             } else {
-                console.log("giteetoken没有保存");
                 handleGistLog.push(`${chrome.i18n.getMessage("giteeTokenNoSaved")}`);
-                let token = prompt(`${chrome.i18n.getMessage("saveTokenKey")}`, `${chrome.i18n.getMessage("saveTokenValue")}`);
-                chrome.storage.local.set({giteeGistToken: token.trim()});
-                console.log("giteetoken保存完毕");
-                handleGistLog.push(`${chrome.i18n.getMessage("giteeTokenSaveSuccess")}`)
-                isStoredGiteeGistIdLocal(action);
+                showSecretPrompt(`${chrome.i18n.getMessage("giteeToken")}`, function (token) {
+                    njEncryptSecret(token).then(function (enc) {
+                        chrome.storage.local.set({giteeGistToken: enc}, function () {
+                            giteeGistToken = token;
+                            handleGistLog.push(`${chrome.i18n.getMessage("giteeTokenSaveSuccess")}`)
+                            isStoredGiteeGistIdLocal(action);
+                        });
+                    });
+                });
             }
         });
     }
@@ -2959,20 +3128,32 @@ https://www.google.com | Google
     }
 
     // ===== WebDAV 同步（阶段C：只做手动上传/恢复，不接进 background 的 Gist 定时器） =====
-    // 从配置页的输入框读 WebDAV 配置，顺手存一份到 chrome.storage.local（只存本机，密码不去任何别的地方）
+    // 从配置页的输入框读 WebDAV 配置；非密码字段顺手存一份到 chrome.storage.local
+    // 密码只加密存：输入框有新密码才更新，留空时用启动时已解密的缓存值，绝不回写明文
     function readWebDavConfig() {
         let urlEl = document.getElementById("webdavUrl");
         if (!urlEl) {
             return null;
         }
+        // 密码不 trim：首尾空格也可能是密码的一部分
+        let passInput = document.getElementById("webdavPass").value;
         let cfg = {
             webdavUrl: urlEl.value.trim(),
             webdavUser: document.getElementById("webdavUser").value.trim(),
-            // 密码不 trim：首尾空格也可能是密码的一部分
-            webdavPass: document.getElementById("webdavPass").value,
+            webdavPass: passInput !== "" ? passInput : njWebdavPassCache,
             webdavFile: document.getElementById("webdavFile").value.trim() || "njtab-backup.json"
         };
-        chrome.storage.local.set(cfg);
+        chrome.storage.local.set({
+            webdavUrl: cfg.webdavUrl,
+            webdavUser: cfg.webdavUser,
+            webdavFile: cfg.webdavFile
+        });
+        if (passInput !== "") {
+            njWebdavPassCache = passInput;
+            njEncryptSecret(passInput).then(function (enc) {
+                chrome.storage.local.set({webdavPass: enc});
+            });
+        }
         return cfg;
     }
 
@@ -3083,12 +3264,12 @@ https://www.google.com | Google
             if (restoreDiscardedEl && storage.restoreDiscarded) {
                 restoreDiscardedEl.checked = true;
             }
-            // 如果已经有保存token就直接列出
+            // 密码/token 不回填明文：已保存时只改输入框提示，留空表示不修改
             if (storage.githubGistToken) {
-                document.getElementById("githubToken").value = storage.githubGistToken
+                document.getElementById("githubToken").placeholder = `${chrome.i18n.getMessage("secretSavedPlaceholder")}`
             }
             if (storage.giteeGistToken) {
-                document.getElementById("giteeToken").value = storage.giteeGistToken
+                document.getElementById("giteeToken").placeholder = `${chrome.i18n.getMessage("secretSavedPlaceholder")}`
             }
             // 如果已经有保存WebDAV配置就直接列出
             if (storage.webdavUrl) {
@@ -3098,7 +3279,7 @@ https://www.google.com | Google
                 document.getElementById("webdavUser").value = storage.webdavUser
             }
             if (storage.webdavPass) {
-                document.getElementById("webdavPass").value = storage.webdavPass
+                document.getElementById("webdavPass").placeholder = `${chrome.i18n.getMessage("secretSavedPlaceholder")}`
             }
             if (storage.webdavFile) {
                 document.getElementById("webdavFile").value = storage.webdavFile
@@ -3188,6 +3369,7 @@ https://www.google.com | Google
               </div>
             </div>
             <p>${chrome.i18n.getMessage("webdavPassTip")}</p>
+            <p>${chrome.i18n.getMessage("secretSecurityNote")}</p>
             <div style="margin-bottom:5px">
                 <button id="webdavUpload" type="button" class="btn btn-default">${chrome.i18n.getMessage("webdavUpload")}</button>
                 <button id="webdavRestore" type="button" class="btn btn-default">${chrome.i18n.getMessage("webdavRestore")}</button>
@@ -3210,23 +3392,46 @@ https://www.google.com | Google
         document.getElementById('save').addEventListener('click', function () {
             let deleteTabOnOpen = document.querySelector('input[name="deleteTabOnOpen"]:checked').value;
             let openBackgroundAfterSendTab = document.querySelector('input[name="openBackgroundAfterSendTab"]:checked').value;
-            let githubGistToken = document.getElementById("githubToken").value
-            let giteeGistToken = document.getElementById("giteeToken").value
+            let githubTokenInput = document.getElementById("githubToken").value
+            let giteeTokenInput = document.getElementById("giteeToken").value
             let webdavUrl = document.getElementById("webdavUrl").value.trim()
             let webdavUser = document.getElementById("webdavUser").value.trim()
-            let webdavPass = document.getElementById("webdavPass").value
+            let webdavPassInput = document.getElementById("webdavPass").value
             let webdavFile = document.getElementById("webdavFile").value.trim() || "njtab-backup.json"
 
-            chrome.storage.local.set({
+            // 密码/token 输入框留空表示不修改；有新值才加密后更新，绝不存明文
+            let toSet = {
                 options: {
                     deleteTabOnOpen: deleteTabOnOpen, openBackgroundAfterSendTab: openBackgroundAfterSendTab
-                }, githubGistToken: githubGistToken, giteeGistToken: giteeGistToken,
-                webdavUrl: webdavUrl, webdavUser: webdavUser, webdavPass: webdavPass, webdavFile: webdavFile
-            }, function () { // show "settings saved" notice thing
-                document.getElementById('saved').style.display = 'block';
-                window.setTimeout(function () {
-                    document.getElementById('saved').style.display = 'none';
-                }, 1000);
+                },
+                webdavUrl: webdavUrl, webdavUser: webdavUser, webdavFile: webdavFile
+            };
+            let jobs = [];
+            if (githubTokenInput.trim() !== "") {
+                jobs.push(njEncryptSecret(githubTokenInput.trim()).then(function (enc) {
+                    toSet.githubGistToken = enc;
+                    githubGistToken = githubTokenInput.trim();
+                }));
+            }
+            if (giteeTokenInput.trim() !== "") {
+                jobs.push(njEncryptSecret(giteeTokenInput.trim()).then(function (enc) {
+                    toSet.giteeGistToken = enc;
+                    giteeGistToken = giteeTokenInput.trim();
+                }));
+            }
+            if (webdavPassInput !== "") {
+                jobs.push(njEncryptSecret(webdavPassInput).then(function (enc) {
+                    toSet.webdavPass = enc;
+                    njWebdavPassCache = webdavPassInput;
+                }));
+            }
+            Promise.all(jobs).then(function () {
+                chrome.storage.local.set(toSet, function () { // show "settings saved" notice thing
+                    document.getElementById('saved').style.display = 'block';
+                    window.setTimeout(function () {
+                        document.getElementById('saved').style.display = 'none';
+                    }, 1000);
+                });
             });
         });
         // 恢复时休眠打开（阶段D）：勾选即存 chrome.storage.local 的 restoreDiscarded，不依赖下面的保存按钮

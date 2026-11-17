@@ -218,18 +218,95 @@ function pushToGiteeGist() {
     }
 }
 
+// ===== 密码/token 本机加密（阶段3，与 workbench.js 同一套格式）=====
+// 存储格式 {__njEnc:1, iv, ct}（AES-GCM 加密）；密钥单独存 njSecretKeyJwk，只留在本机、与密文分开
+// 老版本存的明文在首次读到时自动改存为密文（一次性迁移）；token 绝不打印到日志
+let njKeyPromise = null;
+
+function njB64encode(buf) {
+    let bytes = new Uint8Array(buf);
+    let str = "";
+    for (let i = 0; i < bytes.length; i++) { str += String.fromCharCode(bytes[i]); }
+    return btoa(str);
+}
+
+function njB64decode(str) {
+    let bin = atob(str);
+    let bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) { bytes[i] = bin.charCodeAt(i); }
+    return bytes;
+}
+
+function njGetKey() {
+    if (njKeyPromise) { return njKeyPromise; }
+    njKeyPromise = new Promise(function (resolve, reject) {
+        chrome.storage.local.get("njSecretKeyJwk", function (items) {
+            if (items.njSecretKeyJwk) {
+                crypto.subtle.importKey("jwk", items.njSecretKeyJwk, {name: "AES-GCM"}, true, ["encrypt", "decrypt"]).then(resolve, reject);
+            } else {
+                crypto.subtle.generateKey({name: "AES-GCM", length: 256}, true, ["encrypt", "decrypt"]).then(function (key) {
+                    crypto.subtle.exportKey("jwk", key).then(function (jwk) {
+                        chrome.storage.local.set({njSecretKeyJwk: jwk}, function () { resolve(key); });
+                    }, reject);
+                }, reject);
+            }
+        });
+    });
+    return njKeyPromise;
+}
+
+function njEncryptSecret(plain) {
+    return njGetKey().then(function (key) {
+        let iv = crypto.getRandomValues(new Uint8Array(12));
+        return crypto.subtle.encrypt({name: "AES-GCM", iv: iv}, key, new TextEncoder().encode(plain)).then(function (ct) {
+            return {__njEnc: 1, iv: njB64encode(iv), ct: njB64encode(ct)};
+        });
+    });
+}
+
+function njIsEncryptedSecret(v) {
+    return !!v && typeof v === "object" && v.__njEnc === 1 && typeof v.iv === "string" && typeof v.ct === "string";
+}
+
+function njDecryptSecret(v) {
+    if (v === undefined || v === null || v === "") { return Promise.resolve(""); }
+    if (typeof v === "string") { return Promise.resolve(v); }
+    if (!njIsEncryptedSecret(v)) { return Promise.resolve(""); }
+    return njGetKey().then(function (key) {
+        return crypto.subtle.decrypt({name: "AES-GCM", iv: njB64decode(v.iv)}, key, njB64decode(v.ct)).then(function (buf) {
+            return new TextDecoder().decode(buf);
+        }).catch(function () { return ""; });
+    });
+}
+
+// 读一个密钥字段并回调明文；若存的是老明文，顺手改存为密文（一次性迁移）
+function njLoadSecretField(field, cb) {
+    chrome.storage.local.get(field, function (items) {
+        let v = items[field];
+        if (typeof v === "string" && v !== "") {
+            njEncryptSecret(v).then(function (enc) {
+                let obj = {};
+                obj[field] = enc;
+                chrome.storage.local.set(obj);
+            });
+            cb(v);
+            return;
+        }
+        njDecryptSecret(v).then(function (plain) { cb(plain || ""); });
+    });
+}
+
 // 判断是否已经保存github的Token
 function isStoredGithubTokenLocal(action) {
     console.log("是否已经保存github的Token")
     handleGithubGistLog.push(`${chrome.i18n.getMessage("startCheckGithubTokenSaved")}`);
-    chrome.storage.local.get("githubGistToken", function (storage) {
-        if (storage.githubGistToken) {
-            console.log("已经保存github的Token")
+    // 加密存储：读出并解密（老明文会自动迁移为密文）
+    njLoadSecretField("githubGistToken", function (plain) {
+        if (plain) {
             handleGithubGistLog.push(`${chrome.i18n.getMessage("githubTokenSaved")}`);
-            githubGistToken = storage.githubGistToken;
+            githubGistToken = plain;
             isStoredGithubGistIdLocal(action);
         } else {
-            console.log("没有保存github的Token")
             handleGithubGistLog.push(`${chrome.i18n.getMessage("githubTokenNoSaved")}`);
             pushToGithubGistStatus = undefined;
         }
@@ -240,14 +317,13 @@ function isStoredGithubTokenLocal(action) {
 function isStoredGiteeTokenLocal(action) {
     console.log("是否已经保存gitee的Token")
     handleGiteeGistLog.push(`${chrome.i18n.getMessage("startCheckGiteeTokenSaved")}`);
-    chrome.storage.local.get("giteeGistToken", function (storage) {
-        if (storage.giteeGistToken) {
-            console.log("已经保存gitee的Token")
+    // 加密存储：读出并解密（老明文会自动迁移为密文）
+    njLoadSecretField("giteeGistToken", function (plain) {
+        if (plain) {
             handleGiteeGistLog.push(`${chrome.i18n.getMessage("giteeTokenSaved")}`);
-            giteeGistToken = storage.giteeGistToken;
+            giteeGistToken = plain;
             isStoredGiteeGistIdLocal(action);
         } else {
-            console.log("没有保存gitee的Token")
             handleGiteeGistLog.push(`${chrome.i18n.getMessage("giteeTokenNoSaved")}`);
             pushToGiteeGistStatus = undefined;
         }
