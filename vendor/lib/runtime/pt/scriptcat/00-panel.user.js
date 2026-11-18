@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         每日签到-总面板
 // @namespace    nj.checkin
-// @version      1.0.1
-// @description  汇总显示所有站点脚本今天的执行情况（只读账本，不执行站点动作）
+// @version      1.0.2
+// @description  汇总显示所有站点脚本今天的执行情况（只读账本，不执行站点动作）。面板可点按钮开关、点面板外自动关闭；主题支持自动/白天/暗黑（默认自动）
 // @author       momo
 // @match        *://pt.btschool.club/*
 // @match        *://kp.m-team.cc/*
@@ -13,6 +13,7 @@
 // @match        *://cyanbug.net/*
 // @match        *://longpt.org/*
 // @match        *://pt.0ff.cc/*
+// @match        *://carpt.net/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addValueChangeListener
@@ -23,7 +24,7 @@
 
 (function () {
   'use strict';
-  if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框（趣味盒/群聊区）里重复运行
+  if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框里重复运行
 
   function bjDate(d) {
     d = d || new Date();
@@ -33,6 +34,24 @@
   }
   function get(k, def) { try { const v = GM_getValue(k); return v === undefined ? def : v; } catch (e) { return def; } }
   function set(k, v) { try { GM_setValue(k, v); } catch (e) {} }
+
+  /* ---------- 主题：自动/白天/暗黑，默认自动（跟随系统），选择记在共享账本里全站通用 ---------- */
+  const THEME_LABEL = { auto: '主题：自动', light: '主题：白天', dark: '主题：暗黑' };
+  function themeMode() {
+    const m = get('panelTheme', 'auto');
+    return (m === 'light' || m === 'dark' || m === 'auto') ? m : 'auto';
+  }
+  function effDark() {
+    const m = themeMode();
+    if (m === 'dark') return true;
+    if (m === 'light') return false;
+    try { return window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) { return false; }
+  }
+  function palette() {
+    return effDark()
+      ? { bg: '#1f2226', fg: '#e8e8e8', border: '#4a4f55', hr: '#3a3f45', sub: '#aaaaaa', faint: '#888888' }
+      : { bg: '#ffffff', fg: '#222222', border: '#bbbbbb', hr: '#dddddd', sub: '#666666', faint: '#999999' };
+  }
 
   const STATUS = {
     success: ['成功', '#2e9e4f'],
@@ -66,9 +85,19 @@
   }
 
   let panelEl = null;
+  let panelOpen = false;
+
+  function applyTheme() {
+    if (!panelEl) return;
+    const P = palette();
+    panelEl.style.background = P.bg;
+    panelEl.style.color = P.fg;
+    panelEl.style.borderColor = P.border;
+  }
 
   function render() {
     if (!panelEl) return;
+    const P = palette();
     const registry = get('registry', {});
     const ledger = get('ledger', {});
     const paused = get('paused', {});
@@ -77,7 +106,8 @@
     const dayLedger = ledger[today] || {};
     const siteIds = Object.keys(registry);
     let nAll = 0, nPart = 0, nFail = 0, nNone = 0;
-    let html = '<div style="font-weight:bold;font-size:15px;margin-bottom:6px;">今日总览（' + today + '）</div>';
+    let html = '<div style="font-weight:bold;font-size:15px;margin-bottom:6px;">今日总览（' + today + '）' +
+      '<button data-act="theme" style="float:right;font-weight:normal;font-size:12px;">' + THEME_LABEL[themeMode()] + '</button></div>';
     let sitesHtml = '';
     siteIds.sort().forEach(id => {
       const reg = registry[id];
@@ -87,72 +117,103 @@
       else if (sum.level[0] === '未执行') nNone++;
       else nPart++;
       const isPaused = !!paused[id];
-      sitesHtml += '<div style="border-top:1px solid #ddd;padding:6px 0;">' +
+      sitesHtml += '<div style="border-top:1px solid ' + P.hr + ';padding:6px 0;">' +
         '<div><b>' + reg.name + '</b> <span style="color:' + sum.level[1] + ';font-weight:bold;">' + sum.level[0] + '</span>' +
-        (isPaused ? ' <span style="color:#888;">（已暂停）</span>' : '') +
+        (isPaused ? ' <span style="color:' + P.faint + ';">（已暂停）</span>' : '') +
         ' <button data-act="pause" data-site="' + id + '" style="float:right;">' + (isPaused ? '恢复' : '暂停') + '</button></div>';
       sum.rows.forEach(row => {
         const st = STATUS[row.status] || STATUS.none;
         sitesHtml += '<div style="margin-left:12px;font-size:12px;">· ' + row.task.name +
           '：<span style="color:' + st[1] + ';">' + st[0] + '</span>' +
-          (row.rec ? ' <span style="color:#666;">' + (row.rec.time || '') + ' ' + (row.rec.detail || '') + '</span>' : '') +
+          (row.rec ? ' <span style="color:' + P.sub + ';">' + (row.rec.time || '') + ' ' + (row.rec.detail || '') + '</span>' : '') +
           ((row.status === 'failed' || row.status === 'manual') ? ' <button data-act="retry" data-site="' + id + '" data-task="' + row.task.id + '">重试</button>' : '') +
           '</div>';
       });
       sitesHtml += '</div>';
     });
     html += '<div style="margin-bottom:4px;">共 ' + siteIds.length + ' 个网站：全部成功 ' + nAll + '，部分有问题 ' + nPart + '，全部失败 ' + nFail + '，未执行 ' + nNone + '</div>';
-    html += sitesHtml || '<div style="color:#888;">还没有任何站点脚本登记过。先打开各个网站，脚本运行后这里就会有内容。</div>';
+    html += sitesHtml || '<div style="color:' + P.faint + ';">还没有任何站点脚本登记过。先打开各个网站，脚本运行后这里就会有内容。</div>';
     const due = monthly && monthly.cyanbug && monthly.cyanbug.due;
-    html += '<div style="border-top:1px solid #ddd;padding-top:6px;margin-top:4px;font-size:12px;">月度任务：大青虫求彩虹ID/求vip，下次到期 ' + (due ? String(due).slice(0, 10) : '未设置') + '</div>';
+    html += '<div style="border-top:1px solid ' + P.hr + ';padding-top:6px;margin-top:4px;font-size:12px;">月度任务：大青虫求彩虹ID/求vip，下次到期 ' + (due ? String(due).slice(0, 10) : '未设置') + '</div>';
     html += '<div style="margin-top:8px;"><button data-act="export">导出账本数据</button> <button data-act="close">关闭</button></div>' +
-      '<div style="font-size:11px;color:#999;margin-top:4px;">整份数据备份请用脚本猫自带的备份功能（可走 WebDAV）。</div>';
+      '<div style="font-size:11px;color:' + P.faint + ';margin-top:4px;">整份数据备份请用脚本猫自带的备份功能（可走 WebDAV）。</div>';
     panelEl.innerHTML = html;
   }
 
-  function openPanel() {
-    if (panelEl) { panelEl.style.display = 'block'; render(); return; }
-    panelEl = document.createElement('div');
-    panelEl.style.cssText = 'position:fixed;top:60px;right:16px;width:360px;max-height:75vh;overflow:auto;background:#fff;color:#222;border:1px solid #bbb;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);z-index:2147483647;padding:12px;font-size:13px;line-height:1.5;';
-    document.body.appendChild(panelEl);
-    panelEl.addEventListener('click', e => {
-      const btn = e.target.closest('button');
-      if (!btn) return;
-      const act = btn.getAttribute('data-act');
-      if (act === 'close') { panelEl.style.display = 'none'; }
-      if (act === 'pause') {
-        const site = btn.getAttribute('data-site');
-        const paused = get('paused', {});
-        paused[site] = !paused[site];
-        set('paused', paused);
-        render();
-      }
-      if (act === 'retry') {
-        const req = get('retryReq', {});
-        req[btn.getAttribute('data-site')] = { task: btn.getAttribute('data-task'), ts: Date.now() };
-        set('retryReq', req);
-        btn.textContent = '已请求，打开该站页面时执行';
-        btn.disabled = true;
-      }
-      if (act === 'export') {
-        const data = { registry: get('registry', {}), ledger: get('ledger', {}), monthly: get('monthly', {}), paused: get('paused', {}) };
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = '签到账本-' + bjDate() + '.json';
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-      }
-    });
+  function showPanel() {
+    if (!panelEl) {
+      panelEl = document.createElement('div');
+      panelEl.style.cssText = 'position:fixed;top:60px;right:16px;width:360px;max-height:75vh;overflow:auto;border:1px solid #bbb;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);z-index:2147483647;padding:12px;font-size:13px;line-height:1.5;';
+      document.body.appendChild(panelEl);
+      panelEl.addEventListener('click', e => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        const act = btn.getAttribute('data-act');
+        if (act === 'close') { hidePanel(); }
+        if (act === 'theme') {
+          const order = ['auto', 'light', 'dark'];
+          const next = order[(order.indexOf(themeMode()) + 1) % order.length];
+          set('panelTheme', next);
+          applyTheme();
+          render();
+        }
+        if (act === 'pause') {
+          const site = btn.getAttribute('data-site');
+          const paused = get('paused', {});
+          paused[site] = !paused[site];
+          set('paused', paused);
+          render();
+        }
+        if (act === 'retry') {
+          const req = get('retryReq', {});
+          req[btn.getAttribute('data-site')] = { task: btn.getAttribute('data-task'), ts: Date.now() };
+          set('retryReq', req);
+          btn.textContent = '已请求，打开该站页面时执行';
+          btn.disabled = true;
+        }
+        if (act === 'export') {
+          const data = { registry: get('registry', {}), ledger: get('ledger', {}), monthly: get('monthly', {}), paused: get('paused', {}) };
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = '签到账本-' + bjDate() + '.json';
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+        }
+      });
+    }
+    panelEl.style.display = 'block';
+    panelOpen = true;
+    applyTheme();
     render();
+  }
+  function hidePanel() {
+    if (panelEl) panelEl.style.display = 'none';
+    panelOpen = false;
   }
 
   const btn = document.createElement('div');
   btn.textContent = '签到面板';
   btn.style.cssText = 'position:fixed;right:16px;bottom:16px;background:#2e9e4f;color:#fff;padding:8px 12px;border-radius:20px;cursor:pointer;z-index:2147483646;font-size:13px;box-shadow:0 3px 10px rgba(0,0,0,.3);';
-  btn.addEventListener('click', openPanel);
+  btn.addEventListener('click', () => { if (panelOpen) hidePanel(); else showPanel(); });
   document.body.appendChild(btn);
 
-  try { GM_registerMenuCommand('打开签到面板', openPanel); } catch (e) {}
-  try { GM_addValueChangeListener('ledger', () => { if (panelEl && panelEl.style.display !== 'none') render(); }); } catch (e) {}
+  /* 点面板以外的地方自动关闭 */
+  document.addEventListener('mousedown', e => {
+    if (!panelOpen || !panelEl) return;
+    if (panelEl.contains(e.target) || btn.contains(e.target)) return;
+    hidePanel();
+  }, true);
+
+  /* 系统主题变化时，若面板开着且模式为自动，跟着变 */
+  try {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => { if (panelOpen && themeMode() === 'auto') { applyTheme(); render(); } };
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else if (mq.addListener) mq.addListener(onChange);
+  } catch (e) {}
+
+  try { GM_registerMenuCommand('打开签到面板', showPanel); } catch (e) {}
+  try { GM_addValueChangeListener('ledger', () => { if (panelOpen) render(); }); } catch (e) {}
+  try { GM_addValueChangeListener('panelTheme', () => { if (panelOpen) { applyTheme(); render(); } }); } catch (e) {}
 })();

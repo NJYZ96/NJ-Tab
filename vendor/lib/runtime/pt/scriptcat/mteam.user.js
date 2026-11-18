@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         每日签到-M-Team
 // @namespace    nj.checkin
-// @version      1.0.1
-// @description  M-Team 趣味盒点赞投票（成功标志：点赞点踩都变不可点），结果写入共享账本
+// @version      1.0.2
+// @description  M-Team 趣味盒点赞投票（两个数字按钮：第一个是点赞、第二个是点踩；成功标志：点赞数+1且两个按钮都变不可点），结果写入共享账本。失败自动重试（原地→刷新，一天最多3次）；不在首页时后台打开首页完成
 // @author       momo
 // @match        *://kp.m-team.cc/*
 // @grant        GM_setValue
@@ -14,9 +14,11 @@
 
 (function () {
   'use strict';
-  if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框（趣味盒/群聊区）里重复运行
+  if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框里重复运行
   const SITE = { id: 'mteam', name: 'M-Team', tasks: [{ id: 'funbox', name: '趣味盒点赞' }] };
-  const TAB = Math.random().toString(36).slice(2);
+  const HOME_URL = 'https://kp.m-team.cc/index';
+  function tabId() { try { let t = sessionStorage.getItem('nj-tab-id'); if (!t) { t = Math.random().toString(36).slice(2); sessionStorage.setItem('nj-tab-id', t); } return t; } catch (e) { return 'x' + Math.random().toString(36).slice(2); } }
+  const TAB = tabId();
   function bjDate(d) { d = d || new Date(); const b = new Date(d.getTime() + (d.getTimezoneOffset() + 480) * 60000); const p = n => String(n).padStart(2, '0'); return b.getFullYear() + '-' + p(b.getMonth() + 1) + '-' + p(b.getDate()); }
   function bjTime(d) { d = d || new Date(); const b = new Date(d.getTime() + (d.getTimezoneOffset() + 480) * 60000); const p = n => String(n).padStart(2, '0'); return p(b.getHours()) + ':' + p(b.getMinutes()) + ':' + p(b.getSeconds()); }
   function get(k, def) { try { const v = GM_getValue(k); return v === undefined ? def : v; } catch (e) { return def; } }
@@ -30,46 +32,80 @@
   function pause() { return sleep(600 + Math.random() * 900); }
   async function waitFor(fn, timeout, step) { timeout = timeout || 15000; step = step || 400; const t0 = Date.now(); while (Date.now() - t0 < timeout) { try { const v = fn(); if (v) return v; } catch (e) {} await sleep(step); } return null; }
   function finished(task) { const r = todayRec(task); return r && (r.status === 'success' || r.status === 'done'); }
-
-  // 在趣味盒区域里找点赞/点踩按钮：优先按类的关键词，其次找带 svg 图标且成对出现的按钮
-  function findVoteButtons() {
-    const all = Array.from(document.querySelectorAll('button, a, [role="button"]'));
-    const like = all.find(el => /like|zan|thumb-up|thumbs-up|upvote/i.test(el.className || '') || /like|zan/i.test(el.getAttribute('data-action') || ''));
-    const dislike = all.find(el => /dislike|cai|thumb-down|thumbs-down|downvote/i.test(el.className || '') || /dislike|cai/i.test(el.getAttribute('data-action') || ''));
-    if (like) return { like: like, dislike: dislike || null };
-    // 兜底：找标题含“趣味”的区块，在里面找前两个带图标的按钮
-    const heads = Array.from(document.querySelectorAll('div,section,td,h1,h2,h3,h4'));
-    const head = heads.find(el => (el.textContent || '').indexOf('趣味') >= 0 && el.querySelectorAll('button').length >= 2);
-    if (head) {
-      const btns = Array.from(head.querySelectorAll('button')).filter(b => b.querySelector('svg') || (b.textContent || '').trim().length <= 6);
-      if (btns.length >= 1) return { like: btns[0], dislike: btns[1] || null };
-    }
-    return null;
+  function attempts(task) { const a = get('attempts', {}); const d = a[bjDate()] || {}; const s = d[SITE.id] || {}; return s[task] || 0; }
+  function bumpAttempt(task) { const a = get('attempts', {}); const day = bjDate(); if (!a[day]) a[day] = {}; if (!a[day][SITE.id]) a[day][SITE.id] = {}; a[day][SITE.id][task] = (a[day][SITE.id][task] || 0) + 1; set('attempts', a); return a[day][SITE.id][task]; }
+  function resetAttempts(task) { const a = get('attempts', {}); const day = bjDate(); if (a[day] && a[day][SITE.id]) { a[day][SITE.id][task] = 0; set('attempts', a); } }
+  function openRemote(url) {
+    return new Promise(resolve => {
+      const ifr = document.createElement('iframe');
+      ifr.style.cssText = 'position:fixed;left:-9999px;top:0;width:1280px;height:900px;visibility:hidden;border:0;';
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(ifr); } };
+      ifr.addEventListener('load', () => setTimeout(finish, 900));
+      setTimeout(finish, 20000);
+      ifr.src = url;
+      document.body.appendChild(ifr);
+    });
   }
+  function closeRemote(ifr) { try { ifr.remove(); } catch (e) {} }
   function isDisabled(el) { return el && (el.disabled || el.getAttribute('disabled') !== null || el.classList.contains('disabled')); }
-
-  async function doFunbox() {
-    const found = await waitFor(findVoteButtons, 15000);
-    if (!found) { rec('funbox', 'failed', '没找到趣味盒点赞按钮（页面结构可能变了，需要校准）'); return; }
-    if (isDisabled(found.like)) { rec('funbox', 'done', '点赞按钮已是不可点状态，说明今天已投过'); return; }
-    rec('funbox', 'running', '点击点赞按钮');
+  function nearFunbox(el) {
+    let box = el;
+    for (let i = 0; i < 8 && box; i++) { box = box.parentElement; if (box && (box.textContent || '').indexOf('趣味') >= 0) return true; }
+    return false;
+  }
+  /* 投票按钮是两个“纯数字”按钮挨在一起：第一个点赞、第二个点踩（2026-11-19 实测确认） */
+  function votePair(doc) {
+    const nums = Array.from(doc.querySelectorAll('button')).filter(b => /^\d+$/.test((b.textContent || '').trim()));
+    if (nums.length < 2) return null;
+    for (let i = 0; i + 1 < nums.length; i++) {
+      if (nearFunbox(nums[i])) return { like: nums[i], dislike: nums[i + 1] };
+    }
+    return { like: nums[0], dislike: nums[1] };
+  }
+  async function voteIn(doc) {
+    const pair = await waitFor(() => votePair(doc), 15000);
+    if (!pair) { rec('funbox', 'failed', '没找到趣味盒投票按钮（需要校准）'); return; }
+    if (isDisabled(pair.like) && isDisabled(pair.dislike)) { rec('funbox', 'done', '两个投票按钮已是不可点，说明今天已投过'); return; }
+    if (isDisabled(pair.like)) { rec('funbox', 'done', '点赞按钮已是不可点，说明今天已投过'); return; }
+    const before = parseInt((pair.like.textContent || '').trim(), 10);
+    rec('funbox', 'running', '点击点赞按钮（当前点赞数 ' + before + '）');
     await pause();
-    found.like.click();
+    pair.like.click();
+    /* 点完卡片会整体刷新，按钮元素会被替换，所以每次都重新查 */
     const ok = await waitFor(() => {
-      const f2 = findVoteButtons();
-      if (!f2) return false;
-      return isDisabled(f2.like) && (!f2.dislike || isDisabled(f2.dislike));
-    }, 12000);
-    if (ok) rec('funbox', 'success', '点后点赞和点踩都变成不可点');
-    else rec('funbox', 'failed', '点完后按钮没有变成不可点，投票可能没成功（需要校准）');
+      const p2 = votePair(doc);
+      if (!p2) return false;
+      const now = parseInt((p2.like.textContent || '').trim(), 10);
+      if (isDisabled(p2.like) && isDisabled(p2.dislike)) return { now: now };
+      if (!isNaN(before) && now === before + 1) return { now: now };
+      return false;
+    }, 15000);
+    if (ok) rec('funbox', 'success', '点赞成功（点赞数 ' + before + '→' + ok.now + '，按钮已变不可点）');
+    else rec('funbox', 'failed', '点完后按钮没有变成不可点，投票可能没成功');
+  }
+  async function doFunbox() {
+    if (/\/index/.test(location.pathname) || location.pathname === '/' || location.pathname === '') { await voteIn(document); return; }
+    const ifr = await openRemote(HOME_URL);
+    try {
+      const d = ifr.contentDocument;
+      if (d) await voteIn(d); else rec('funbox', 'failed', '跨页打开首页失败');
+    } finally { closeRemote(ifr); }
   }
 
   const runners = { funbox: doFunbox };
   async function run(task, force) {
     if (isPaused()) return;
     if (!force && finished(task)) return;
+    if (!force && attempts(task) >= 3) return;
     if (!claim()) return;
+    const n = bumpAttempt(task);
     try { await runners[task](); } catch (e) { rec(task, 'failed', '脚本出错：' + (e && e.message ? e.message : e)); }
+    const r = todayRec(task);
+    if (r && r.status === 'failed' && n < 3) {
+      if (n === 1) setTimeout(() => run(task, true), 20000 + Math.random() * 15000);
+      else setTimeout(() => { try { location.reload(); } catch (e) {} }, 15000 + Math.random() * 15000);
+    }
   }
   async function main() {
     register();
@@ -79,7 +115,7 @@
   try {
     GM_addValueChangeListener('retryReq', function (name, oldV, newV) {
       const req = newV && newV[SITE.id];
-      if (req && Date.now() - req.ts < 300000 && runners[req.task]) run(req.task, true);
+      if (req && Date.now() - req.ts < 300000 && runners[req.task]) { resetAttempts(req.task); run(req.task, true); }
     });
   } catch (e) {}
   main();

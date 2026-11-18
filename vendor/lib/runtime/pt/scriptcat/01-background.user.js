@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         每日签到-后台定时
 // @namespace    nj.checkin
-// @version      1.0.0
-// @description  每小时检查：月度任务到期开页执行、每日汇总通知、清理旧账本
+// @version      1.0.2
+// @description  每小时检查：月度任务到期开页执行、CarPT天天快乐到期开页续领、每日汇总通知、清理旧账本
 // @author       momo
 // @crontab      7 * * * *
 // @grant        GM_setValue
@@ -56,6 +56,21 @@
         GM_openInTab('https://cyanbug.net/index.php', true);
         opened.date = today;
         set('monthlyOpened', opened);
+      }
+    }
+  } catch (e) {}
+
+  // 2b) CarPT 天天快乐到期（24小时循环）：打开签到页让站点脚本续领（每天最多开一次）
+  try {
+    const ct = get('carptTask', {});
+    const openedC = get('carptOpened', {});
+    if (ct.until && new Date(ct.until).getTime() <= Date.now() && openedC.date !== today) {
+      const ledger = get('ledger', {});
+      const recT = (((ledger[today] || {}).carpt || {}).task) || null;
+      if (!recT || (recT.status !== 'success' && recT.status !== 'done')) {
+        GM_openInTab('https://carpt.net/attendance.php', true);
+        openedC.date = today;
+        set('carptOpened', openedC);
       }
     }
   } catch (e) {}
