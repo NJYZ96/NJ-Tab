@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-RousiPro
 // @namespace    nj.checkin
-// @version      1.0.0
+// @version      1.0.1
 // @description  RousiPro 每日签到：先选“随机”并验证选中，再点立即签到。结果写入共享账本
 // @author       momo
 // @match        *://rousi.pro/account/economy*
@@ -14,6 +14,7 @@
 
 (function () {
   'use strict';
+  if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框（趣味盒/群聊区）里重复运行
   const SITE = { id: 'rousipro', name: 'RousiPro', tasks: [{ id: 'checkin', name: '每日签到（随机）' }] };
   const TAB = Math.random().toString(36).slice(2);
   function bjDate(d) { d = d || new Date(); const b = new Date(d.getTime() + (d.getTimezoneOffset() + 480) * 60000); const p = n => String(n).padStart(2, '0'); return b.getFullYear() + '-' + p(b.getMonth() + 1) + '-' + p(b.getDate()); }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-Farmm
 // @namespace    nj.checkin
-// @version      1.0.0
+// @version      1.0.1
 // @description  Farmm 滑块签到：脚本先按真人节奏试拖最多3次，过不了记“需要手动”并通知。结果写入共享账本
 // @author       momo
 // @match        *://pt.0ff.cc/attendance.php*
@@ -15,6 +15,7 @@
 
 (function () {
   'use strict';
+  if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框（趣味盒/群聊区）里重复运行
   const SITE = { id: 'farmm', name: 'Farmm', tasks: [{ id: 'checkin', name: '滑块签到' }] };
   const TAB = Math.random().toString(36).slice(2);
   function bjDate(d) { d = d || new Date(); const b = new Date(d.getTime() + (d.getTimezoneOffset() + 480) * 60000); const p = n => String(n).padStart(2, '0'); return b.getFullYear() + '-' + p(b.getMonth() + 1) + '-' + p(b.getDate()); }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-M-Team
 // @namespace    nj.checkin
-// @version      1.0.0
+// @version      1.0.1
 // @description  M-Team 趣味盒点赞投票（成功标志：点赞点踩都变不可点），结果写入共享账本
 // @author       momo
 // @match        *://kp.m-team.cc/*
@@ -14,6 +14,7 @@
 
 (function () {
   'use strict';
+  if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框（趣味盒/群聊区）里重复运行
   const SITE = { id: 'mteam', name: 'M-Team', tasks: [{ id: 'funbox', name: '趣味盒点赞' }] };
   const TAB = Math.random().toString(36).slice(2);
   function bjDate(d) { d = d || new Date(); const b = new Date(d.getTime() + (d.getTimezoneOffset() + 480) * 60000); const p = n => String(n).padStart(2, '0'); return b.getFullYear() + '-' + p(b.getMonth() + 1) + '-' + p(b.getDate()); }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-HDBao
 // @namespace    nj.checkin
-// @version      1.0.0
+// @version      1.0.1
 // @description  HDBao 签到（隐藏框打开签到页点立即签到）+ 趣味盒投票，结果写入共享账本
 // @author       momo
 // @match        *://hdbao.cc/*
@@ -14,6 +14,7 @@
 
 (function () {
   'use strict';
+  if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框（趣味盒/群聊区）里重复运行
   const SITE = { id: 'hdbao', name: 'HDBao', tasks: [{ id: 'checkin', name: '每日签到' }, { id: 'funbox', name: '趣味盒投票' }] };
   const TAB = Math.random().toString(36).slice(2);
   function bjDate(d) { d = d || new Date(); const b = new Date(d.getTime() + (d.getTimezoneOffset() + 480) * 60000); const p = n => String(n).padStart(2, '0'); return b.getFullYear() + '-' + p(b.getMonth() + 1) + '-' + p(b.getDate()); }
@@ -29,7 +30,7 @@
   function pause() { return sleep(600 + Math.random() * 900); }
   function docText(doc) { return (doc && doc.body) ? (doc.body.innerText || '') : ''; }
   function pageText() { return docText(document); }
-  function findBtn(root, texts) { const els = root.querySelectorAll('a,button,input[type="button"],input[type="submit"]'); for (const el of els) { const t = (el.textContent || el.value || '').trim(); if (texts.indexOf(t) >= 0) return el; } return null; }
+  function findBtn(root, texts) { const els = root.querySelectorAll('a,button,input[type="button"],input[type="submit"],[role="button"]'); for (const el of els) { const t = (el.textContent || el.value || '').trim(); if (texts.indexOf(t) >= 0) return el; } return null; }
   async function waitFor(fn, timeout, step) { timeout = timeout || 12000; step = step || 400; const t0 = Date.now(); while (Date.now() - t0 < timeout) { try { const v = fn(); if (v) return v; } catch (e) {} await sleep(step); } return null; }
   function finished(task) { const r = todayRec(task); return r && (r.status === 'success' || r.status === 'done'); }
 
@@ -69,17 +70,21 @@
   }
 
   async function doFunbox() {
-    const doc = await waitFor(funboxDoc, 12000);
-    if (!doc) { rec('funbox', 'failed', '没找到趣味盒所在的框'); return; }
-    const btn = findBtn(doc, ['有趣']);
-    if (!btn) { rec('funbox', 'done', '趣味盒没有投票按钮，说明已投过'); return; }
+    // 同类站点实测（BTSCHOOL，2026-11-19）：投票按钮在主页面里，不在趣味盒小框内，先找主页面
+    let btn = await waitFor(() => findBtn(document, ['有趣']), 12000);
+    if (!btn) {
+      const doc = funboxDoc();
+      if (doc) btn = findBtn(doc, ['有趣']);
+    }
+    if (!btn) {
+      if (pageText().indexOf('认为它有趣') >= 0) { rec('funbox', 'done', '趣味盒没有投票按钮，说明已投过'); return; }
+      rec('funbox', 'failed', '没找到趣味盒投票按钮');
+      return;
+    }
     rec('funbox', 'running', '点击有趣');
     await pause();
     btn.click();
-    const ok = await waitFor(() => {
-      const d = funboxDoc() || doc;
-      return !findBtn(d, ['有趣']) || docText(d).indexOf('谢谢！你的投票已提交') >= 0;
-    }, 12000);
+    const ok = await waitFor(() => !findBtn(document, ['有趣']) || pageText().indexOf('谢谢！你的投票已提交') >= 0 || pageText().indexOf('你觉得呢') < 0, 12000);
     if (ok) rec('funbox', 'success', '点“有趣”后按钮消失/出现谢谢提示');
     else rec('funbox', 'failed', '点完后按钮还在，投票可能没成功');
   }

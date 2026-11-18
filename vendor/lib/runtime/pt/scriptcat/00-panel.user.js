@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-总面板
 // @namespace    nj.checkin
-// @version      1.0.0
+// @version      1.0.1
 // @description  汇总显示所有站点脚本今天的执行情况（只读账本，不执行站点动作）
 // @author       momo
 // @match        *://pt.btschool.club/*
@@ -23,6 +23,7 @@
 
 (function () {
   'use strict';
+  if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框（趣味盒/群聊区）里重复运行
 
   function bjDate(d) {
     d = d || new Date();
