@@ -521,6 +521,9 @@
 	"backupImportSuccess": {
 		"message": "Import finished, the page will reload."
 	},
+	"backupImportSkipped": {
+		"message": " problem item(s) will be skipped (see the operation log for details)"
+	},
 	"settingsAlsoRestored": {
 		"message": "Settings from the backup were also restored."
 	},
@@ -787,5 +790,23 @@
 	},
 	"webdavNewerWarnSuffix": {
 		"message": "), which is newer than the current plugin. Please confirm carefully before restoring."
+	},
+	"logSectionGist": {
+		"message": "Gist Backup"
+	},
+	"logSectionWebdav": {
+		"message": "WebDAV"
+	},
+	"logSectionImportExport": {
+		"message": "Import / Export"
+	},
+	"logSectionOps": {
+		"message": "Operation Log"
+	},
+	"logShowMore": {
+		"message": "Show more"
+	},
+	"logCollapse": {
+		"message": "Show less"
 	}
 }

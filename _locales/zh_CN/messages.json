@@ -521,6 +521,9 @@
 	"backupImportSuccess": {
 		"message": "导入完成，页面将刷新。"
 	},
+	"backupImportSkipped": {
+		"message": "条问题数据会被跳过（详情见操作日志）"
+	},
 	"settingsAlsoRestored": {
 		"message": "备份中的配置也已一并恢复。"
 	},
@@ -787,5 +790,23 @@
 	},
 	"webdavNewerWarnSuffix": {
 		"message": "），比当前插件还新，恢复前请确认。"
+	},
+	"logSectionGist": {
+		"message": "Gist 备份"
+	},
+	"logSectionWebdav": {
+		"message": "WebDAV"
+	},
+	"logSectionImportExport": {
+		"message": "导入导出"
+	},
+	"logSectionOps": {
+		"message": "操作日志"
+	},
+	"logShowMore": {
+		"message": "查看更多"
+	},
+	"logCollapse": {
+		"message": "收起"
 	}
 }

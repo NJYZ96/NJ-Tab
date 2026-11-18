@@ -701,7 +701,12 @@ function makeTabGroup(tabsArr) {
     let tabGroup = {
         date: date, id: genObjectId() // clever way to quickly get a unique ID
     };
-    let res = tabsArr.map(({title, url}) => ({title, url}));
+    // 4.3 需求四：标签带自己的添加时间 addTime——已有的原样保留，没有的用本组生成时刻补上
+    let res = tabsArr.map(function (t) {
+        let nt = {title: t.title, url: t.url};
+        nt.addTime = (t && typeof t.addTime === "string" && t.addTime) ? t.addTime : date;
+        return nt;
+    });
     tabGroup.tabs = res;
     tabGroup.isLock = false;
     tabGroup.groupTitle = '';
@@ -751,6 +756,8 @@ function saveTabGroup(tabGroup) {
 }
 
 // 打开background页
+// 4.3 需求三：查已打开的管理页时只认本扩展自己的（带上 runtime.id），
+// 避免商店版 3.1 与开发版 4.x 同时装时互相抢占对方的管理页
 function openBackgroundPage() {
     let pinnedTabsCount = 0
     // 查询当前窗口的所有标签页
@@ -758,7 +765,7 @@ function openBackgroundPage() {
         // 统计固定标签的数量
         pinnedTabsCount = tabs.filter(tab => tab.pinned).length;
     });
-    chrome.tabs.query({url: "chrome-extension://*/workbench.html*", currentWindow: true}, function (tab) {
+    chrome.tabs.query({url: "chrome-extension://" + chrome.runtime.id + "/nj-workbench.html*", currentWindow: true}, function (tab) {
         if (tab.length >= 1) {
             chrome.tabs.move(tab[0].id, {index: 0}, function callback() {
                 chrome.tabs.update(tab[0].id, {highlighted: true});
@@ -766,14 +773,14 @@ function openBackgroundPage() {
             chrome.tabs.reload(tab[0].id, {}, function (tab) {
             });
         } else {
-            chrome.tabs.create({index: 0, url: chrome.runtime.getURL('workbench.html')});
+            chrome.tabs.create({index: 0, url: chrome.runtime.getURL('nj-workbench.html')});
         }
     });
 }
 
 // 暗地里刷新background页
 function reloadBackgroundPage() {
-    chrome.tabs.query({url: "chrome-extension://*/workbench.html*", currentWindow: true}, function (tab) {
+    chrome.tabs.query({url: "chrome-extension://" + chrome.runtime.id + "/nj-workbench.html*", currentWindow: true}, function (tab) {
         if (tab.length >= 1) {
             chrome.tabs.reload(tab[0].id, {}, function (tab) {
             });
