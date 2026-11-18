@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-M-Team
 // @namespace    nj.checkin
-// @version      1.0.2
+// @version      1.0.3
 // @description  M-Team 趣味盒点赞投票（两个数字按钮：第一个是点赞、第二个是点踩；成功标志：点赞数+1且两个按钮都变不可点），结果写入共享账本。失败自动重试（原地→刷新，一天最多3次）；不在首页时后台打开首页完成
 // @author       momo
 // @match        *://kp.m-team.cc/*
@@ -96,7 +96,7 @@
   const runners = { funbox: doFunbox };
   async function run(task, force) {
     if (isPaused()) return;
-    if (!force && finished(task)) return;
+    if (finished(task)) return; // 已成功/已完成的任务绝不重复执行（包括自动重试与手动重试触发时）
     if (!force && attempts(task) >= 3) return;
     if (!claim()) return;
     const n = bumpAttempt(task);

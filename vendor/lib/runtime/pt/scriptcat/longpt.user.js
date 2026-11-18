@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         每日签到-LongPT
 // @namespace    nj.checkin
-// @version      1.0.2
-// @description  LongPT 每日抽奖（靠记录列表判断）+ 喊话“求上传”（抓一闪而过的提示/看龙宝回复）。本站任意页打开都会补做。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本
+// @version      1.0.3
+// @description  LongPT 每日抽奖（核获奖记录最新一条：须今天创建且“等待开奖”）+ 喊话“求上传”（只认自己存的状态防重复提交；页面提示“已经喊过”即记已完成）。本站任意页打开都会补做。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本
 // @author       momo
 // @match        *://longpt.org/*
 // @grant        GM_setValue
@@ -45,6 +45,12 @@
   function attempts(task) { const a = get('attempts', {}); const d = a[bjDate()] || {}; const s = d[SITE.id] || {}; return s[task] || 0; }
   function bumpAttempt(task) { const a = get('attempts', {}); const day = bjDate(); if (!a[day]) a[day] = {}; if (!a[day][SITE.id]) a[day][SITE.id] = {}; a[day][SITE.id][task] = (a[day][SITE.id][task] || 0) + 1; set('attempts', a); return a[day][SITE.id][task]; }
   function resetAttempts(task) { const a = get('attempts', {}); const day = bjDate(); if (a[day] && a[day][SITE.id]) { a[day][SITE.id][task] = 0; set('attempts', a); } }
+  const ATT_URL = 'https://longpt.org/attendance.php';
+  /* 签到天数：从页面文字读连续/累计，存共享区供面板在站名后显示 */
+  function saveStreak(cont, total) { if (cont == null && total == null) return; const info = get('siteInfo', {}); const cur = info[SITE.id] || {}; if (cont != null) cur.cont = cont; if (total != null) cur.total = total; info[SITE.id] = cur; set('siteInfo', info); }
+  function streakFromText(t) { if (!t) return; const cm = t.match(/连续签到\s*(\d+)\s*天/) || t.match(/已连续\s*(\d+)\s*天/) || t.match(/连续\s*(\d+)\s*天/) || t.match(/(\d+)\s*天\s*连续签到/); const tm = t.match(/累计签到\s*(\d+)\s*天/) || t.match(/累计\s*(\d+)\s*天/) || t.match(/第\s*(\d+)\s*次签到/) || t.match(/(\d+)\s*次\s*累计签到/); saveStreak(cm ? parseInt(cm[1], 10) : null, tm ? parseInt(tm[1], 10) : null); }
+  async function fetchText(url) { try { const r = await fetch(url, { credentials: 'same-origin' }); const h = await r.text(); const dp = new DOMParser().parseFromString(h, 'text/html'); return dp.body ? (dp.body.textContent || '') : ''; } catch (e) { return ''; } }
+  async function captureStreak() { try { streakFromText(await fetchText(ATT_URL)); } catch (e) {} }
   function openRemote(url) {
     return new Promise(resolve => {
       const ifr = document.createElement('iframe');
@@ -59,18 +65,29 @@
   }
   function closeRemote(ifr) { try { ifr.remove(); } catch (e) {} }
 
-  /* ---------- 抽奖：靠记录里有没有今天的条目判断 ---------- */
-  function hasTodayRecord(text) {
-    return text.indexOf(bjDate()) >= 0 && (text.indexOf('等待开奖') >= 0 || text.indexOf('恭喜您') >= 0 || text.indexOf('未中奖') >= 0);
+  /* ---------- 抽奖：核获奖记录最新一条——创建时间必须是今天、状态必须是“等待开奖”（或已开奖结果） ---------- */
+  function latestRecordOk(text) {
+    if (!text) return false;
+    const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+      if (!m) continue;
+      /* 找到第一条带日期的记录（即最新一条），只看这一条及其紧邻几行 */
+      const seg = lines.slice(i, i + 5).join(' ');
+      const recDate = m[1] + '-' + String(m[2]).padStart(2, '0') + '-' + String(m[3]).padStart(2, '0');
+      if (recDate !== bjDate()) return false;
+      return /等待开奖|恭喜您|未中奖/.test(seg);
+    }
+    return false;
   }
   async function fetchPageText(url) {
     const res = await fetch(url, { credentials: 'include' });
     const html = await res.text();
     const doc = new DOMParser().parseFromString(html, 'text/html');
-    return doc.body ? (doc.body.innerText || '') : '';
+    return doc.body ? (doc.body.textContent || '') : '';
   }
   async function doLotteryIn(doc) {
-    if (hasTodayRecord(docText(doc))) { rec('lottery', 'done', '记录里已有今天的条目，今天已参与'); return; }
+    if (latestRecordOk(docText(doc))) { rec('lottery', 'done', '获奖记录最新一条是今天创建、状态“等待开奖”，今天已参与'); return; }
     const btn = await waitFor(() => findBtn(doc, ['立即参与']), 12000);
     if (!btn) { rec('lottery', 'failed', '没找到“立即参与”按钮'); return; }
     if (bjHour() >= 23 * 60 + 29) { rec('lottery', 'failed', '已过今天参与时间（23:29 截止）且记录里没有今天的条目'); return; }
@@ -79,50 +96,77 @@
     btn.click();
     const ok = await waitFor(async () => {
       const t = await fetchPageText(PLUGINS_URL);
-      return hasTodayRecord(t);
+      return latestRecordOk(t);
     }, 90000, 15000);
-    if (ok) rec('lottery', 'success', '参与后记录里出现今天的“等待开奖”条目，今晚23:30开奖');
-    else rec('lottery', 'failed', '点完后90秒内记录里没出现今天的条目');
+    if (ok) rec('lottery', 'success', '参与后获奖记录最新一条为今天的“等待开奖”，今晚23:30开奖');
+    else rec('lottery', 'failed', '点完后90秒内获奖记录里没出现今天的条目');
   }
 
-  /* ---------- 喊话：先挂监听抓一闪而过的提示 ---------- */
+  /* ---------- 喊话：页面不显示“已喊过”，只能靠自己存的状态防重复提交 ----------
+     规则：提交前先落“已提交”标记；带标记进来时只核实结果、绝不再提交。
+     页面提示“你已经喊过了”＝今天已喊过，记已完成并停手。 */
+  async function verifyShoutByHome() {
+    try {
+      const home = await fetchPageText('https://longpt.org/');
+      const b = new Date(Date.now() + (new Date().getTimezoneOffset() + 480) * 60000);
+      const stamp = '[' + String(b.getMonth() + 1).padStart(2, '0') + '.' + String(b.getDate()).padStart(2, '0');
+      const lines = home.split('\n').filter(l => l.indexOf('龙宝') >= 0 && l.indexOf('响应了你的请求') >= 0 && l.indexOf(stamp) >= 0);
+      if (lines.length) return lines[lines.length - 1].trim();
+    } catch (e) {}
+    return '';
+  }
   async function doShoutIn(doc) {
+    const sentAlready = get('longptShoutSent', '') === bjDate();
     const input = Array.from(doc.querySelectorAll('input[type="text"], textarea')).find(el => /喊话内容需包含/.test(el.placeholder || ''));
     const btn = findBtn(doc, ['喊话']);
-    if (!input || !btn) { rec('shout', 'failed', '没找到喊话框或喊话按钮'); return; }
-    let toastText = '';
+    if (!input || !btn) {
+      if (sentAlready) {
+        const v = await verifyShoutByHome();
+        if (v) { rec('shout', 'success', '群聊区龙宝回复：' + v); return; }
+        rec('shout', 'waiting', '今天已提交过喊话（页面上找不到喊话框，只核实不重提）');
+        return;
+      }
+      rec('shout', 'failed', '没找到喊话框或喊话按钮');
+      return;
+    }
+    let toastText = '', alreadyText = '';
     const MO = (doc.defaultView && doc.defaultView.MutationObserver) || MutationObserver;
     const ob = new MO(muts => {
       for (const m of muts) {
         for (const node of m.addedNodes) {
           if (node.nodeType === 1) {
             const t = (node.innerText || node.textContent || '').trim();
-            if (t && t.length < 300 && (/龙宝/.test(t) || /获得上传量/.test(t) || /响应了你的请求/.test(t))) { toastText = t; }
+            if (t && t.length < 300) {
+              if (/已经喊过/.test(t)) alreadyText = t;
+              else if (/龙宝/.test(t) || /获得上传量/.test(t) || /响应了你的请求/.test(t)) toastText = t;
+            }
           }
         }
       }
     });
     try { ob.observe(doc.body, { childList: true, subtree: true }); } catch (e) {}
-    rec('shout', 'running', '发送“求上传”');
-    const w = doc.defaultView || window;
-    const proto = input.tagName === 'TEXTAREA' ? w.HTMLTextAreaElement.prototype : w.HTMLInputElement.prototype;
-    const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
-    setter.call(input, '求上传');
-    input.dispatchEvent(new w.Event('input', { bubbles: true }));
-    input.dispatchEvent(new w.Event('change', { bubbles: true }));
-    await pause();
-    btn.click();
-    const got = await waitFor(() => toastText, 20000, 300);
-    if (got) { try { ob.disconnect(); } catch (e) {} rec('shout', 'success', '抓到页面提示：' + got); return; }
-    try {
-      const home = await fetchPageText('https://longpt.org/');
-      const b = new Date(Date.now() + (new Date().getTimezoneOffset() + 480) * 60000);
-      const stamp = '[' + String(b.getMonth() + 1).padStart(2, '0') + '.' + String(b.getDate()).padStart(2, '0');
-      const lines = home.split('\n').filter(l => l.indexOf('龙宝') >= 0 && l.indexOf('响应了你的请求') >= 0 && l.indexOf(stamp) >= 0);
-      if (lines.length) { try { ob.disconnect(); } catch (e) {} rec('shout', 'success', '群聊区龙宝回复：' + lines[lines.length - 1].trim()); return; }
-    } catch (e) {}
+    if (!sentAlready) {
+      set('longptShoutSent', bjDate()); // 先落标记再提交，任何重试都不会重复提交
+      rec('shout', 'running', '发送“求上传”');
+      const w = doc.defaultView || window;
+      const proto = input.tagName === 'TEXTAREA' ? w.HTMLTextAreaElement.prototype : w.HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+      setter.call(input, '求上传');
+      input.dispatchEvent(new w.Event('input', { bubbles: true }));
+      input.dispatchEvent(new w.Event('change', { bubbles: true }));
+      await pause();
+      btn.click();
+    } else {
+      rec('shout', 'running', '今天已提交过喊话，只核实结果，不再重复提交');
+    }
+    const got = await waitFor(() => alreadyText || toastText || (docText(doc).indexOf('已经喊过') >= 0 ? 'PAGE_ALREADY' : ''), 20000, 300);
     try { ob.disconnect(); } catch (e) {}
-    rec('shout', 'failed', '没抓到页面提示，群聊区也没找到龙宝今天的回复');
+    if (alreadyText || got === 'PAGE_ALREADY') { rec('shout', 'done', '页面提示今天已经喊过（龙宝不想理你），说明今天已喊过，不再重复'); return; }
+    if (toastText) { rec('shout', 'success', '抓到页面提示：' + toastText); return; }
+    const v = await verifyShoutByHome();
+    if (v) { rec('shout', 'success', '群聊区龙宝回复：' + v); return; }
+    if (sentAlready) rec('shout', 'waiting', '今天已提交过喊话，但没核实到龙宝回复；已停手，不会重复提交');
+    else rec('shout', 'failed', '没抓到页面提示，群聊区也没找到龙宝今天的回复（已落“已提交”标记，重试只核实不重提）');
   }
 
   async function withPluginsDoc(fn) {
@@ -139,7 +183,7 @@
   const runners = { lottery: doLottery, shout: doShout };
   async function run(task, force) {
     if (isPaused()) return;
-    if (!force && finished(task)) return;
+    if (finished(task)) return; // 已成功/已完成的任务绝不重复执行（包括自动重试与手动重试触发时）
     if (!force && attempts(task) >= 3) return;
     if (!claim()) return;
     const n = bumpAttempt(task);
@@ -154,6 +198,7 @@
     register();
     if (isPaused()) return;
     for (const t of SITE.tasks) await run(t.id, false);
+    captureStreak();
   }
   try {
     GM_addValueChangeListener('retryReq', function (name, oldV, newV) {

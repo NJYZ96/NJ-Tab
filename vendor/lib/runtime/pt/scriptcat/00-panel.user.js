@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         每日签到-总面板
 // @namespace    nj.checkin
-// @version      1.0.2
-// @description  汇总显示所有站点脚本今天的执行情况（只读账本，不执行站点动作）。面板可点按钮开关、点面板外自动关闭；主题支持自动/白天/暗黑（默认自动）
+// @version      1.0.3
+// @description  汇总显示所有站点脚本今天的执行情况（只读账本，不执行站点动作）。面板可点按钮开关、点面板外自动关闭；主题为右上角图标按钮（自动/白天/暗黑，默认自动），面板按钮跟随主题配色；在哪个站打开面板，哪个站置顶显示
 // @author       momo
 // @match        *://pt.btschool.club/*
 // @match        *://kp.m-team.cc/*
@@ -36,7 +36,8 @@
   function set(k, v) { try { GM_setValue(k, v); } catch (e) {} }
 
   /* ---------- 主题：自动/白天/暗黑，默认自动（跟随系统），选择记在共享账本里全站通用 ---------- */
-  const THEME_LABEL = { auto: '主题：自动', light: '主题：白天', dark: '主题：暗黑' };
+  const THEME_NAME = { auto: '自动', light: '白天', dark: '暗黑' };
+  const THEME_ICON = { auto: '◐', light: '☀', dark: '☾' };
   function themeMode() {
     const m = get('panelTheme', 'auto');
     return (m === 'light' || m === 'dark' || m === 'auto') ? m : 'auto';
@@ -49,9 +50,15 @@
   }
   function palette() {
     return effDark()
-      ? { bg: '#1f2226', fg: '#e8e8e8', border: '#4a4f55', hr: '#3a3f45', sub: '#aaaaaa', faint: '#888888' }
-      : { bg: '#ffffff', fg: '#222222', border: '#bbbbbb', hr: '#dddddd', sub: '#666666', faint: '#999999' };
+      ? { bg: '#1f2226', fg: '#e8e8e8', border: '#4a4f55', hr: '#3a3f45', sub: '#aaaaaa', faint: '#888888', btnBg: '#2e3237' }
+      : { bg: '#ffffff', fg: '#222222', border: '#bbbbbb', hr: '#dddddd', sub: '#666666', faint: '#999999', btnBg: '#f0f0f0' };
   }
+  /* 当前页面是哪个站（在哪个站打开面板，哪个站置顶） */
+  const HOST2SITE = {
+    'pt.btschool.club': 'btschool', 'kp.m-team.cc': 'mteam', 'www.nicept.net': 'nicept',
+    'hdbao.cc': 'hdbao', 'www.haidan.cc': 'haidan', 'rousi.pro': 'rousipro',
+    'cyanbug.net': 'cyanbug', 'longpt.org': 'longpt', 'pt.0ff.cc': 'farmm', 'carpt.net': 'carpt'
+  };
 
   const STATUS = {
     success: ['成功', '#2e9e4f'],
@@ -100,16 +107,19 @@
     const P = palette();
     const registry = get('registry', {});
     const ledger = get('ledger', {});
+    const siteInfo = get('siteInfo', {});
     const paused = get('paused', {});
     const monthly = get('monthly', {});
     const today = bjDate();
     const dayLedger = ledger[today] || {};
     const siteIds = Object.keys(registry);
+    const curId = HOST2SITE[location.hostname] || '';
+    const BS = 'background:' + P.btnBg + ';color:' + P.fg + ';border:1px solid ' + P.border + ';border-radius:6px;padding:2px 10px;cursor:pointer;font-size:12px;';
     let nAll = 0, nPart = 0, nFail = 0, nNone = 0;
     let html = '<div style="font-weight:bold;font-size:15px;margin-bottom:6px;">今日总览（' + today + '）' +
-      '<button data-act="theme" style="float:right;font-weight:normal;font-size:12px;">' + THEME_LABEL[themeMode()] + '</button></div>';
+      '<button data-act="theme" title="主题：' + THEME_NAME[themeMode()] + '（点按切换）" style="float:right;font-weight:normal;font-size:14px;' + BS + '">' + THEME_ICON[themeMode()] + '</button></div>';
     let sitesHtml = '';
-    siteIds.sort().forEach(id => {
+    siteIds.sort((a, b) => (a === curId ? -1 : (b === curId ? 1 : (a < b ? -1 : 1)))).forEach(id => {
       const reg = registry[id];
       const sum = siteSummary(id, reg, dayLedger);
       if (sum.level[0] === '全部成功') nAll++;
@@ -117,16 +127,18 @@
       else if (sum.level[0] === '未执行') nNone++;
       else nPart++;
       const isPaused = !!paused[id];
+      const info = siteInfo[id] || {};
+      const streakTxt = (info.cont != null || info.total != null) ? '：连续/累计签到（' + (info.cont != null ? info.cont : '-') + ' / ' + (info.total != null ? info.total : '-') + '）天' : '';
       sitesHtml += '<div style="border-top:1px solid ' + P.hr + ';padding:6px 0;">' +
-        '<div><b>' + reg.name + '</b> <span style="color:' + sum.level[1] + ';font-weight:bold;">' + sum.level[0] + '</span>' +
+        '<div><b>' + reg.name + '</b>' + (id === curId ? ' <span style="color:#2e9e4f;font-weight:bold;">（本站）</span>' : '') + streakTxt + ' <span style="color:' + sum.level[1] + ';font-weight:bold;">' + sum.level[0] + '</span>' +
         (isPaused ? ' <span style="color:' + P.faint + ';">（已暂停）</span>' : '') +
-        ' <button data-act="pause" data-site="' + id + '" style="float:right;">' + (isPaused ? '恢复' : '暂停') + '</button></div>';
+        ' <button data-act="pause" data-site="' + id + '" style="float:right;' + BS + '">' + (isPaused ? '恢复' : '暂停') + '</button></div>';
       sum.rows.forEach(row => {
         const st = STATUS[row.status] || STATUS.none;
         sitesHtml += '<div style="margin-left:12px;font-size:12px;">· ' + row.task.name +
           '：<span style="color:' + st[1] + ';">' + st[0] + '</span>' +
           (row.rec ? ' <span style="color:' + P.sub + ';">' + (row.rec.time || '') + ' ' + (row.rec.detail || '') + '</span>' : '') +
-          ((row.status === 'failed' || row.status === 'manual') ? ' <button data-act="retry" data-site="' + id + '" data-task="' + row.task.id + '">重试</button>' : '') +
+          ((row.status === 'failed' || row.status === 'manual') ? ' <button data-act="retry" data-site="' + id + '" data-task="' + row.task.id + '" style="' + BS + '">重试</button>' : '') +
           '</div>';
       });
       sitesHtml += '</div>';
@@ -135,7 +147,7 @@
     html += sitesHtml || '<div style="color:' + P.faint + ';">还没有任何站点脚本登记过。先打开各个网站，脚本运行后这里就会有内容。</div>';
     const due = monthly && monthly.cyanbug && monthly.cyanbug.due;
     html += '<div style="border-top:1px solid ' + P.hr + ';padding-top:6px;margin-top:4px;font-size:12px;">月度任务：大青虫求彩虹ID/求vip，下次到期 ' + (due ? String(due).slice(0, 10) : '未设置') + '</div>';
-    html += '<div style="margin-top:8px;"><button data-act="export">导出账本数据</button> <button data-act="close">关闭</button></div>' +
+    html += '<div style="margin-top:8px;"><button data-act="export" style="' + BS + '">导出账本数据</button></div>' +
       '<div style="font-size:11px;color:' + P.faint + ';margin-top:4px;">整份数据备份请用脚本猫自带的备份功能（可走 WebDAV）。</div>';
     panelEl.innerHTML = html;
   }

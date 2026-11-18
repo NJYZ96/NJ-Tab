@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-NicePT
 // @namespace    nj.checkin
-// @version      1.0.2
+// @version      1.0.3
 // @description  NicePT 签到确认（网站自动签到）+ 趣味盒投票。本站任意页打开都会补做。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本
 // @author       momo
 // @match        *://www.nicept.net/*
@@ -45,6 +45,9 @@
   function attempts(task) { const a = get('attempts', {}); const d = a[bjDate()] || {}; const s = d[SITE.id] || {}; return s[task] || 0; }
   function bumpAttempt(task) { const a = get('attempts', {}); const day = bjDate(); if (!a[day]) a[day] = {}; if (!a[day][SITE.id]) a[day][SITE.id] = {}; a[day][SITE.id][task] = (a[day][SITE.id][task] || 0) + 1; set('attempts', a); return a[day][SITE.id][task]; }
   function resetAttempts(task) { const a = get('attempts', {}); const day = bjDate(); if (a[day] && a[day][SITE.id]) { a[day][SITE.id][task] = 0; set('attempts', a); } }
+  /* 签到天数：从页面文字读连续/累计，存共享区供面板在站名后显示 */
+  function saveStreak(cont, total) { if (cont == null && total == null) return; const info = get('siteInfo', {}); const cur = info[SITE.id] || {}; if (cont != null) cur.cont = cont; if (total != null) cur.total = total; info[SITE.id] = cur; set('siteInfo', info); }
+  function streakFromText(t) { if (!t) return; const cm = t.match(/连续签到\s*(\d+)\s*天/) || t.match(/已连续\s*(\d+)\s*天/) || t.match(/连续\s*(\d+)\s*天/) || t.match(/(\d+)\s*天\s*连续签到/); const tm = t.match(/累计签到\s*(\d+)\s*天/) || t.match(/累计\s*(\d+)\s*天/) || t.match(/第\s*(\d+)\s*次签到/) || t.match(/(\d+)\s*次\s*累计签到/); saveStreak(cm ? parseInt(cm[1], 10) : null, tm ? parseInt(tm[1], 10) : null); }
   function openRemote(url) {
     return new Promise(resolve => {
       const ifr = document.createElement('iframe');
@@ -62,14 +65,15 @@
 
   async function doCheckin() {
     // 本站打开签到页自动签到。先看当前页，再不行就后台打开签到页触发，回首页确认
-    if (signedText(pageText())) { rec('checkin', 'success', '页面出现“签到已得/签到成功”，网站自动签到已完成'); return; }
+    if (signedText(pageText())) { streakFromText(pageText()); rec('checkin', 'success', '页面出现“签到已得/签到成功”，网站自动签到已完成'); return; }
     const att = await openRemote(ATT_URL);
+    try { const ad = att.contentDocument; if (ad) streakFromText(docText(ad)); } catch (e) {}
     closeRemote(att);
     const home = await openRemote(HOME_URL);
     try {
       const d = home.contentDocument;
       const ok = d && await waitFor(() => signedText(docText(d)), 8000);
-      if (ok) { rec('checkin', 'success', '后台打开签到页后，首页出现“签到已得”，自动签到已完成'); return; }
+      if (ok) { streakFromText(docText(d)); rec('checkin', 'success', '后台打开签到页后，首页出现“签到已得”，自动签到已完成'); return; }
     } finally { closeRemote(home); }
     rec('checkin', 'waiting', '还没看到签到字样，签到页打开后网站会自动签到');
   }
@@ -101,7 +105,7 @@
   const runners = { checkin: doCheckin, funbox: doFunbox };
   async function run(task, force) {
     if (isPaused()) return;
-    if (!force && finished(task)) return;
+    if (finished(task)) return; // 已成功/已完成的任务绝不重复执行（包括自动重试与手动重试触发时）
     if (!force && attempts(task) >= 3) return;
     if (!claim()) return;
     const n = bumpAttempt(task);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-Farmm
 // @namespace    nj.checkin
-// @version      1.0.2
+// @version      1.0.3
 // @description  Farmm 滑块签到：脚本先按真人节奏试拖最多3次，过不了记“需要手动”并通知。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本
 // @author       momo
 // @match        *://pt.0ff.cc/attendance.php*
@@ -29,6 +29,7 @@
   function isPaused() { return !!get('paused', {})[SITE.id]; }
   function claim() { const locks = get('locks', {}); const cur = locks[SITE.id]; const now = Date.now(); if (cur && now - cur.ts < 600000 && cur.owner !== TAB) return false; locks[SITE.id] = { ts: now, owner: TAB }; set('locks', locks); return true; }
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+  async function waitFor(fn, timeout, step) { timeout = timeout || 12000; step = step || 500; const t0 = Date.now(); while (Date.now() - t0 < timeout) { try { const v = await fn(); if (v) return v; } catch (e) {} await sleep(step); } return null; }
   function pageText() { return document.body ? (document.body.innerText || '') : ''; }
   function finished(task) { const r = todayRec(task); return r && (r.status === 'success' || r.status === 'done'); }
   /* 失败自动重试：一天最多 3 次（第一次失败原地重试，第二次失败刷新页面重试），次数记账跨刷新不清零 */
@@ -63,48 +64,91 @@
   function fireMouse(el, type, x, y) {
     el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window }));
   }
+  function firePointer(el, type, x, y) {
+    try { el.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse', isPrimary: true, buttons: type === 'pointerup' ? 0 : 1, view: window })); } catch (e) {}
+  }
   async function dragOnce(handle, box) {
     const hr = handle.getBoundingClientRect();
     const br = box.getBoundingClientRect();
     const startX = hr.left + hr.width / 2;
     const startY = hr.top + hr.height / 2;
     const endX = br.right - hr.width / 2 - 2;
+    firePointer(handle, 'pointerdown', startX, startY);
     fireMouse(handle, 'mousedown', startX, startY);
-    const steps = 14 + Math.floor(Math.random() * 6);
+    const steps = 16 + Math.floor(Math.random() * 6);
     for (let i = 1; i <= steps; i++) {
-      const x = startX + (endX - startX) * (i / steps);
-      fireMouse(document, 'mousemove', x, startY + (Math.random() * 4 - 2));
-      await sleep(30 + Math.random() * 50);
+      const p = i / steps;
+      const ease = 1 - Math.pow(1 - p, 2); // 先快后慢，接近真人
+      const x = startX + (endX - startX) * ease;
+      const y = startY + (Math.random() * 4 - 2);
+      firePointer(document, 'pointermove', x, y);
+      fireMouse(document, 'mousemove', x, y);
+      await sleep(20 + Math.random() * 30);
     }
+    await sleep(250 + Math.random() * 200); // 到头后稍停一下再松手
+    firePointer(document, 'pointerup', endX, startY);
     fireMouse(document, 'mouseup', endX, startY);
+    firePointer(handle, 'pointerup', endX, startY);
+    fireMouse(handle, 'mouseup', endX, startY);
   }
 
+  const ATT_URL = 'https://pt.0ff.cc/attendance.php';
+  /* 签到天数：从页面文字读连续/累计，存共享区供面板在站名后显示 */
+  function saveStreak(cont, total) { if (cont == null && total == null) return; const info = get('siteInfo', {}); const cur = info[SITE.id] || {}; if (cont != null) cur.cont = cont; if (total != null) cur.total = total; info[SITE.id] = cur; set('siteInfo', info); }
+  function streakFromText(t) { if (!t) return; const cm = t.match(/连续签到\s*(\d+)\s*天/) || t.match(/已连续\s*(\d+)\s*天/) || t.match(/连续\s*(\d+)\s*天/) || t.match(/(\d+)\s*天\s*连续签到/); const tm = t.match(/累计签到\s*(\d+)\s*天/) || t.match(/累计\s*(\d+)\s*天/) || t.match(/第\s*(\d+)\s*次签到/) || t.match(/(\d+)\s*次\s*累计签到/); saveStreak(cm ? parseInt(cm[1], 10) : null, tm ? parseInt(tm[1], 10) : null); }
+  async function fetchText(url) { try { const r = await fetch(url, { credentials: 'same-origin' }); const h = await r.text(); const dp = new DOMParser().parseFromString(h, 'text/html'); return dp.body ? (dp.body.textContent || '') : ''; } catch (e) { return ''; } }
+  async function captureStreak() { try { streakFromText(await fetchText(ATT_URL)); } catch (e) {} }
+
+  /* 已签到页的可靠标志：有“签到成功”且滑块已经不在了。
+     教训（2026-11-19）：未签到时页面里也藏着“签到成功”字样，只看文字会误判成功，其实根本没拖。 */
+  function isSignedPage() {
+    const t = pageText();
+    if (t.indexOf('签到成功') < 0) return false;
+    if (t.indexOf('拖动滑块验证') >= 0) return false;
+    return !findSlider();
+  }
+  function signedDetail() {
+    const t = pageText();
+    const m = t.match(/\+([\d,]+)\s*魔力值\s*本次获得/);
+    return m ? ('签到成功，本次获得 ' + m[1] + ' 魔力值') : '页面已跳转到签到成功页';
+  }
   async function doCheckin() {
-    if (pageText().indexOf('签到成功') >= 0) { rec('checkin', 'success', '页面显示“签到成功”'); return; }
+    if (isSignedPage()) { streakFromText(pageText()); rec('checkin', 'success', signedDetail()); return; }
     const text = pageText();
     if (/拼图|点选|点击图片|短信/.test(text)) {
       rec('checkin', 'manual', '验证形式变了（出现拼图/点选/短信字样），脚本不尝试，请手动完成');
       try { GM_notification({ title: 'Farmm 需要手动', text: '签到验证形式变了，请打开签到页手动完成。', timeout: 15000 }); } catch (e) {}
       return;
     }
-    const found = findSlider();
-    if (!found) { rec('checkin', 'failed', '没找到滑块（页面结构可能变了，需要校准）'); return; }
-    for (let i = 1; i <= 3; i++) {
-      rec('checkin', 'running', '第 ' + i + ' 次尝试拖动滑块');
-      await dragOnce(found.handle, found.box);
-      await sleep(1800);
-      if (pageText().indexOf('签到成功') >= 0) { rec('checkin', 'success', '第 ' + i + ' 次拖动通过，页面显示签到成功'); return; }
-      const again = findSlider();
-      if (again) { found.handle = again.handle; found.box = again.box; }
+    const drags = get('farmmDrags', {});
+    const used = drags[bjDate()] || 0;
+    if (used >= 3) {
+      rec('checkin', 'manual', '今天已自动拖了3次仍没跳转成功，已停手，请打开签到页手动拖一下');
+      try { GM_notification({ title: 'Farmm 需要手动', text: '滑块自动拖了3次没过，请打开签到页手动拖一下就签完到了。', timeout: 15000 }); } catch (e) {}
+      return;
     }
-    rec('checkin', 'manual', '滑块试了3次没过，已停手，请打开签到页手动拖一下');
-    try { GM_notification({ title: 'Farmm 需要手动', text: '滑块试了3次没过，请打开签到页手动拖一下就签完到了。', timeout: 15000 }); } catch (e) {}
+    const found = await waitFor(() => findSlider(), 10000);
+    if (!found) { rec('checkin', 'failed', '没找到滑块（页面结构可能变了，需要校准）'); return; }
+    drags[bjDate()] = used + 1;
+    set('farmmDrags', drags);
+    rec('checkin', 'running', '第 ' + (used + 1) + ' 次拖动滑块（今天最多3次）');
+    await dragOnce(found.handle, found.box);
+    /* 验证通过后页面会自己跳转到签到成功页（实测约10秒内），最多等15秒 */
+    const ok = await waitFor(() => isSignedPage(), 15000, 500);
+    if (ok) { streakFromText(pageText()); rec('checkin', 'success', signedDetail()); return; }
+    if (used + 1 < 3) {
+      rec('checkin', 'waiting', '第 ' + (used + 1) + ' 次拖动后页面没跳转，刷新页面再确认');
+      try { location.reload(); } catch (e) {}
+      return;
+    }
+    rec('checkin', 'manual', '滑块拖了3次都没跳转到签到成功页，已停手，请打开签到页手动拖一下');
+    try { GM_notification({ title: 'Farmm 需要手动', text: '滑块自动拖了3次没过，请打开签到页手动拖一下就签完到了。', timeout: 15000 }); } catch (e) {}
   }
 
   const runners = { checkin: doCheckin };
   async function run(task, force) {
     if (isPaused()) return;
-    if (!force && finished(task)) return;
+    if (finished(task)) return; // 已成功/已完成的任务绝不重复执行（包括自动重试与手动重试触发时）
     if (!force && attempts(task) >= 3) return; // 今天已试满3次，面板手动重试可重置后再跑
     if (!claim()) return;
     const n = bumpAttempt(task);
@@ -119,6 +163,7 @@
     register();
     if (isPaused()) return;
     for (const t of SITE.tasks) await run(t.id, false);
+    captureStreak();
   }
   try {
     GM_addValueChangeListener('retryReq', function (name, oldV, newV) {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-大青虫CyanBug
 // @namespace    nj.checkin
-// @version      1.0.2
+// @version      1.0.3
 // @description  大青虫：趣味盒投票 + 每日群聊两条（间隔70秒、等青虫娘回复）+ 月度群聊两条（到期才发）。本站任意页打开都会补做（后台打开首页完成）。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本
 // @author       momo
 // @match        *://cyanbug.net/*
@@ -44,6 +44,12 @@
   function attempts(task) { const a = get('attempts', {}); const d = a[bjDate()] || {}; const s = d[SITE.id] || {}; return s[task] || 0; }
   function bumpAttempt(task) { const a = get('attempts', {}); const day = bjDate(); if (!a[day]) a[day] = {}; if (!a[day][SITE.id]) a[day][SITE.id] = {}; a[day][SITE.id][task] = (a[day][SITE.id][task] || 0) + 1; set('attempts', a); return a[day][SITE.id][task]; }
   function resetAttempts(task) { const a = get('attempts', {}); const day = bjDate(); if (a[day] && a[day][SITE.id]) { a[day][SITE.id][task] = 0; set('attempts', a); } }
+  const ATT_URL = 'https://cyanbug.net/attendance.php';
+  /* 签到天数：从页面文字读连续/累计，存共享区供面板在站名后显示 */
+  function saveStreak(cont, total) { if (cont == null && total == null) return; const info = get('siteInfo', {}); const cur = info[SITE.id] || {}; if (cont != null) cur.cont = cont; if (total != null) cur.total = total; info[SITE.id] = cur; set('siteInfo', info); }
+  function streakFromText(t) { if (!t) return; const cm = t.match(/连续签到\s*(\d+)\s*天/) || t.match(/已连续\s*(\d+)\s*天/) || t.match(/连续\s*(\d+)\s*天/) || t.match(/(\d+)\s*天\s*连续签到/); const tm = t.match(/累计签到\s*(\d+)\s*天/) || t.match(/累计\s*(\d+)\s*天/) || t.match(/第\s*(\d+)\s*次签到/) || t.match(/(\d+)\s*次\s*累计签到/); saveStreak(cm ? parseInt(cm[1], 10) : null, tm ? parseInt(tm[1], 10) : null); }
+  async function fetchText(url) { try { const r = await fetch(url, { credentials: 'same-origin' }); const h = await r.text(); const dp = new DOMParser().parseFromString(h, 'text/html'); return dp.body ? (dp.body.textContent || '') : ''; } catch (e) { return ''; } }
+  async function captureStreak() { try { streakFromText(await fetchText(ATT_URL)); } catch (e) {} }
   function openRemote(url) {
     return new Promise(resolve => {
       const ifr = document.createElement('iframe');
@@ -214,7 +220,7 @@
   const runners = { funbox: doFunbox, daily: doDaily, monthly: doMonthly };
   async function run(task, force) {
     if (isPaused()) return;
-    if (!force && finished(task)) return;
+    if (finished(task)) return; // 已成功/已完成的任务绝不重复执行（包括自动重试与手动重试触发时）
     if (task !== 'monthly' && !force && attempts(task) >= 3) return;
     if (!claim()) return;
     const n = task === 'monthly' ? 1 : bumpAttempt(task);
@@ -231,6 +237,7 @@
     await run('funbox', false);
     await run('daily', false);
     await run('monthly', false);
+    captureStreak();
   }
   try {
     GM_addValueChangeListener('retryReq', function (name, oldV, newV) {
