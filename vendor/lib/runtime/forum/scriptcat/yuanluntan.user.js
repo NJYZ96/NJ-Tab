@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-Ycoo源论坛
 // @namespace    nj.checkin
-// @version      1.0.3
+// @version      1.0.4
 // @description  源论坛（论坛类，开源阅读社区）每日签到。本站任意页打开都会补做。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本（总面板可看）
 // @author       momo
 // @match        *://ycoo.net/*
@@ -54,6 +54,24 @@
   function saveStreak(cont, total) { if (cont == null && total == null) return; const info = get('siteInfo', {}); const cur = info[SITE.id] || {}; if (cont != null) cur.cont = cont; if (total != null) cur.total = total; info[SITE.id] = cur; set('siteInfo', info); }
   function streakFromText(t) { if (!t) return; const cm = t.match(/连续签到\s*([\d,]+)\s*天/); const tm = t.match(/总天数\s*([\d,]+)\s*天/); saveStreak(cm ? parseInt(cm[1].replace(/,/g, ''), 10) : null, tm ? parseInt(tm[1].replace(/,/g, ''), 10) : null); }
   function rewardDetail(t) { const m = (t || '').match(/积分奖励\s*([\d,]+)/); return m ? '获得 ' + m[1] + ' 星币' : ''; }
+  function myName(doc) {
+    const a = doc.querySelector('.vwmy a, a[href*="home.php?mod=space&uid="]');
+    return (a && a.textContent) ? a.textContent.trim() : '';
+  }
+  /* 奖励读法（用户定）：奖励位置不固定，去排行榜里找带自己用户名那一行，读行尾的“上次奖励” */
+  function rewardFromRow(doc) {
+    const name = myName(doc);
+    if (!name) return '';
+    const rows = Array.from(doc.querySelectorAll('tr'));
+    for (const r of rows) {
+      const t = (r.textContent || '').replace(/\s+/g, ' ').trim();
+      if (t.indexOf(name) < 0 || t.length > 120) continue;
+      const m = t.match(/([\d,]+)\s*(车票|星币)\s*$/);
+      if (m) return '获得 ' + m[1] + ' ' + m[2];
+    }
+    return '';
+  }
+  function bestDetail(doc, t) { return rewardFromRow(doc) || rewardDetail(t); }
   function notSigned(t) { return (t || '').indexOf('您今天还没有签到') >= 0; }
   /* 找签到按钮（实测 2026-11-19）：按钮文字就是“签到”，不在顶部导航里；
      顶部导航也有一个“签到”链接（指向签到页本身），必须排除：链接地址带 k_misign 的、导航/头部区域里的都不算。
@@ -111,14 +129,14 @@
     getDoc = getDoc || (() => doc);
     const t0 = docText(doc);
     streakFromText(t0);
-    if (!notSigned(t0)) { rec('checkin', 'done', rewardDetail(t0)); return; } // 没有“您今天还没有签到”＝今天已签到
+    if (!notSigned(t0)) { rec('checkin', 'done', bestDetail(doc, t0)); return; } // 没有“您今天还没有签到”＝今天已签到
     const btn = signBtn(doc);
     if (!btn) { rec('checkin', 'failed', '没找到签到按钮；页面上带“签到”的文字：' + nearMiss(doc)); return; }
     rec('checkin', 'running', '点击签到');
     await pause();
     btn.click();
     const ok = await waitFor(() => { const t = docText(getDoc() || doc); return !notSigned(t) || t.indexOf('签到成功') >= 0; }, 15000);
-    if (ok) { const t1 = docText(getDoc() || doc); streakFromText(t1); rec('checkin', 'success', rewardDetail(t1)); }
+    if (ok) { const d1 = getDoc() || doc; const t1 = docText(d1); streakFromText(t1); rec('checkin', 'success', bestDetail(d1, t1)); }
     else rec('checkin', 'failed', '点完后页面仍显示“您今天还没有签到”');
   }
   async function doCheckin() {

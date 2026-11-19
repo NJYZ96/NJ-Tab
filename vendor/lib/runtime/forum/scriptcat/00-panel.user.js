@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-论坛总面板
 // @namespace    nj.checkin
-// @version      1.0.1
+// @version      1.0.2
 // @description  汇总显示论坛类站点脚本今天的执行情况（只读账本，不执行站点动作）。面板可点按钮开关、点面板外自动关闭；主题为右上角图标按钮（自动/白天/暗黑，默认自动），面板按钮跟随主题配色；在哪个站打开面板，哪个站置顶显示
 // @author       momo
 // @grant        GM_setValue
@@ -135,7 +135,7 @@
         /* 成功类状态不显示说明文字（只有“获得 N 魔力”和 CarPT 进行中这类有用信息例外）；失败/等待才显示原因 */
         let detail = row.rec ? (row.rec.detail || '') : '';
         if (row.status === 'success' || row.status === 'done' || row.status === 'novote') {
-          if (!/^(获得 [\d,]+ 魔力|任务：进行中)/.test(detail)) detail = '';
+          if (!/^(获得 [\d,]+ |任务：进行中)/.test(detail)) detail = '';
         }
         sitesHtml += '<div style="margin-left:12px;font-size:12px;">· ' + row.task.name +
           '：<span style="color:' + st[1] + ';">' + st[0] + '</span>' +
