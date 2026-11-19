@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-大青虫CyanBug
 // @namespace    nj.checkin
-// @version      1.0.4
+// @version      1.0.5
 // @description  大青虫：趣味盒投票 + 每日群聊两条（间隔70秒、等青虫娘回复）+ 月度群聊两条（到期才发）。本站任意页打开都会补做（后台打开首页完成）。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本
 // @author       momo
 // @match        *://cyanbug.net/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
   if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框里重复运行（小框内容由主脚本跨框查找处理）
-  const SITE = { id: 'cyanbug', name: 'CyanBug-大青虫', tasks: [{ id: 'funbox', name: '趣味盒投票' }, { id: 'chatup', name: '每日群聊（求上传）' }, { id: 'chatmagic', name: '每日群聊（求魔力）' }, { id: 'monthly', name: '月度群聊（求彩虹ID+求vip）' }] };
+  const SITE = { id: 'cyanbug', name: 'CyanBug-大青虫', tasks: [{ id: 'funbox', name: '趣味盒投票' }, { id: 'chatup', name: '每日群聊（求上传）' }, { id: 'chatmagic', name: '每日群聊（求魔力）' }, { id: 'mrainbow', name: '月度群聊（求彩虹ID）' }, { id: 'mvip', name: '月度群聊（求vip）' }] };
   const HOME_URL = 'https://cyanbug.net/index.php';
   function tabId() { try { let t = sessionStorage.getItem('nj-tab-id'); if (!t) { t = Math.random().toString(36).slice(2); sessionStorage.setItem('nj-tab-id', t); } return t; } catch (e) { return 'x' + Math.random().toString(36).slice(2); } }
   const TAB = tabId();
@@ -24,9 +24,9 @@
   function bjTime(d) { d = d || new Date(); const b = new Date(d.getTime() + (d.getTimezoneOffset() + 480) * 60000); const p = n => String(n).padStart(2, '0'); return p(b.getHours()) + ':' + p(b.getMinutes()) + ':' + p(b.getSeconds()); }
   function get(k, def) { try { const v = GM_getValue(k); return v === undefined ? def : v; } catch (e) { return def; } }
   function set(k, v) { try { GM_setValue(k, v); } catch (e) {} }
-  function rec(task, status, detail) { const L = get('ledger', {}); const day = bjDate(); if (!L[day]) L[day] = {}; if (!L[day][SITE.id]) L[day][SITE.id] = {}; L[day][SITE.id][task] = { status: status, time: bjTime(), detail: detail || '' }; set('ledger', L); }
+  function rec(task, status, detail) { const L = get('ledger', {}); const day = bjDate(); if (!L[day]) L[day] = {}; if (!L[day][SITE.id]) L[day][SITE.id] = {}; const cur = L[day][SITE.id][task]; /* 写前复查：今天已是完成态（成功/已完成/无需投票）的记录，不许被未完成状态盖掉——防旧流程或重复运行把好记录冲成失败 */ if (cur && (cur.status === 'success' || cur.status === 'done' || cur.status === 'novote') && status !== 'success' && status !== 'done' && status !== 'novote') return; L[day][SITE.id][task] = { status: status, time: bjTime(), detail: detail || '' }; set('ledger', L); }
   function todayRec(task) { const L = get('ledger', {}); const d = L[bjDate()] || {}; const s = d[SITE.id] || {}; return s[task] || null; }
-  function register() { const r = get('registry', {}); r[SITE.id] = { name: SITE.name, tasks: SITE.tasks }; set('registry', r); }
+  function register() { const r = get('registry', {}); r[SITE.id] = { name: SITE.name, tasks: SITE.tasks, version: (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '' }; set('registry', r); }
   function isPaused() { return !!get('paused', {})[SITE.id]; }
   function claim() { const locks = get('locks', {}); const cur = locks[SITE.id]; const now = Date.now(); if (cur && now - cur.ts < 1500000 && cur.owner !== TAB) return false; locks[SITE.id] = { ts: now, owner: TAB }; set('locks', locks); return true; }
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -134,42 +134,6 @@
       lines: lines
     };
   }
-  async function sendAndWait(rootDoc, msg) {
-    const input = chatInputIn(rootDoc);
-    const btn = chatSendBtn(input);
-    if (!input || !btn) return { kind: 'error', line: '没找到群聊输入框或发送按钮（需要校准）' };
-    const before = replyState(rootDoc);
-    setValue(input, msg);
-    await pause();
-    btn.click();
-    const sentAt = Date.now();
-    const got = await waitFor(() => {
-      const now = replyState(rootDoc);
-      if (now.reward > before.reward) return { kind: 'reward', line: now.lines.filter(l => l.indexOf('响应了你的召唤') >= 0).pop() || '' };
-      if (now.dup > before.dup) return { kind: 'dup', line: now.lines.filter(l => l.indexOf('今日已经获得') >= 0).pop() || '' };
-      return null;
-    }, 300000, 3000);
-    if (!got) return { kind: 'none', line: '等了5分钟没等到青虫娘回复，没有重发', sentAt: sentAt };
-    got.sentAt = sentAt;
-    return got;
-  }
-  async function runPair(rootDoc, taskId, msg1, msg2) {
-    rec(taskId, 'running', '发送第一条：' + msg1);
-    const r1 = await sendAndWait(rootDoc, msg1);
-    if (r1.kind === 'error') { rec(taskId, 'failed', r1.line); return null; }
-    if (r1.kind === 'none') { rec(taskId, 'failed', '第一条没等到回复：' + r1.line); return null; }
-    const elapsed = Date.now() - r1.sentAt;
-    if (elapsed < 70000) {
-      rec(taskId, 'waiting', '第一条已确认，等够70秒间隔再发第二条');
-      await sleep(70000 - elapsed);
-    }
-    rec(taskId, 'running', '发送第二条：' + msg2);
-    const r2 = await sendAndWait(rootDoc, msg2);
-    if (r2.kind === 'error') { rec(taskId, 'failed', r2.line); return null; }
-    if (r2.kind === 'none') { rec(taskId, 'failed', '第二条没等到回复：' + r2.line); return null; }
-    const allDup = r1.kind === 'dup' && r2.kind === 'dup';
-    return { allDup: allDup, detail: '第一条：' + r1.line + '；第二条：' + r2.line };
-  }
   /* ---------- 每日群聊：拆成两条独立任务，状态存 cyanbugChat（按日期记账） ----------
      只认存储状态：未发送才发送；已发送只核实回复、绝不重复发送；已确认直接跳过。 */
   function chatState() { const all = get('cyanbugChat', {}); return all[bjDate()] || { up: 'none', magic: 'none', upTs: 0 }; }
@@ -211,12 +175,15 @@
     const input = chatInputIn(rootDoc);
     const btn = chatSendBtn(input);
     if (!input || !btn) { rec(taskId, 'failed', '没找到群聊输入框或发送按钮（需要校准）'); return; }
+    const lastChat = get('cyanbugLastChatTs', 0);
+    if (lastChat && Date.now() - lastChat < 70000) { rec(taskId, 'waiting', '等聊天框70秒间隔（每日与月度群聊共用一个聊天框）'); await sleep(70000 - (Date.now() - lastChat)); }
     const before = replyState(rootDoc);
     const patch = {}; patch[key] = 'sent'; patch[key + 'Ts'] = Date.now(); setChat(patch); // 先落状态再发送，刷新/重开也不会重复发送
     rec(taskId, 'running', '发送：' + msg);
     setValue(input, msg);
     await pause();
     btn.click();
+    set('cyanbugLastChatTs', Date.now());
     const got = await waitReply(rootDoc, before, 300000);
     if (got === 'reward') { const p = {}; p[key] = 'confirmed'; setChat(p); rec(taskId, 'success', ''); return; }
     if (got === 'dup') { setChat({ up: 'confirmed', magic: 'confirmed' }); rec(taskId, 'done', ''); return; }
@@ -224,24 +191,75 @@
   }
   async function chatUpIn(rootDoc) { await chatOne(rootDoc, 'chatup', 'up', '青虫娘，求上传'); }
   async function chatMagicIn(rootDoc) { await chatOne(rootDoc, 'chatmagic', 'magic', '青虫娘，求魔力'); }
-  async function monthlyIn(rootDoc) {
-    const monthly = get('monthly', {});
-    if (!monthly.cyanbug) { monthly.cyanbug = { due: '2026-11-23T00:00:00+08:00' }; set('monthly', monthly); }
-    const due = new Date(monthly.cyanbug.due);
-    if (Date.now() < due.getTime()) {
-      rec('monthly', 'notdue', '还没到期，下次到期 ' + bjDate(due) + '，到期后打开本站任意页自动执行');
+  /* ---------- 月度群聊：拆两条，状态直接读用户详情页，不靠推算记时间 ----------
+     详情页“等级”栏有“贵宾资格结束时间: 2026-11-23 00:00:00”（贵宾即 VIP）；“道具”栏有“[彩虹 ID](截止时间: 2026-12-19 00:00:00)”。
+     两者结束时间各自独立：结束时间在未来 = 生效中（面板绿色“生效中”）；已过期或没有 = 到期，走群聊申请。
+     申请流程与每日群聊相同：只认存储状态（cyanbugMonthlyChat，按各自结束时间分期）、发送前先落状态、绝不重复发送。 */
+  function monthlyDue() { const m = get('monthly', {}); if (!m.cyanbug || !m.cyanbug.due) { m.cyanbug = { due: '2026-11-23T00:00:00+08:00' }; set('monthly', m); } return m.cyanbug.due; }
+  function findDetailsUrl(doc) { const a = doc.querySelector('a[href*="userdetails.php?id="]'); return a ? a.href : ''; }
+  async function readMonthlyStatus() {
+    const url = findDetailsUrl(document);
+    if (!url) return null;
+    const ifr = await openRemote(url);
+    try {
+      const t = ifr.contentDocument ? docText(ifr.contentDocument) : '';
+      if (!t) return null;
+      const vm = t.match(/贵宾资格结束时间[:：]\s*(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/);
+      const rm = t.match(/彩虹\s*ID[\s\S]{0,16}?截止时间[:：]\s*(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/);
+      return { vipEnd: vm ? vm[1] + 'T' + vm[2] + '+08:00' : '', rainbowEnd: rm ? rm[1] + 'T' + rm[2] + '+08:00' : '' };
+    } catch (e) { return null; } finally { try { ifr.remove(); } catch (e) {} }
+  }
+  function daysLeft(endIso) { const a = new Date(bjDate() + 'T00:00:00+08:00').getTime(); const b = new Date(bjDate(new Date(endIso)) + 'T00:00:00+08:00').getTime(); return Math.round((b - a) / 86400000); }
+  /* 读到的结束时间同步给后台脚本的开页判断（取两者较早的一个当到期日） */
+  function syncDueFromStatus(st) { const ends = [st.vipEnd, st.rainbowEnd].filter(Boolean).sort(); if (!ends.length) return; const m = get('monthly', {}); m.cyanbug = { due: ends[0] }; set('monthly', m); }
+  function mState(key, endStr) { const all = get('cyanbugMonthlyChat', {}); if (all[key + 'End'] !== endStr) { all[key] = 'none'; all[key + 'End'] = endStr; all[key + 'Ts'] = 0; set('cyanbugMonthlyChat', all); } return all; }
+  function setMState(patch) { const cur = get('cyanbugMonthlyChat', {}); for (const k in patch) cur[k] = patch[k]; set('cyanbugMonthlyChat', cur); }
+  async function monthlyOne(rootDoc, taskId, key, msg, endStr) {
+    let st = mState(key, endStr);
+    if (st[key] === 'confirmed') { rec(taskId, 'done', ''); return; }
+    if (key === 'vip' && st.rainbow !== 'confirmed' && !(st.rainbowEnd && new Date(st.rainbowEnd).getTime() > Date.now())) { rec(taskId, 'waiting', '等第一条（求彩虹ID）处理完再发'); return; }
+    if (st[key] === 'sent' && replyState(rootDoc).dup > 0) { setMState({ rainbow: 'confirmed', vip: 'confirmed' }); rec(taskId, 'done', ''); return; }
+    if (st[key] === 'sent') {
+      rec(taskId, 'running', '已发送过，只等回复确认，不重复发送');
+      const got = await waitReply(rootDoc, replyState(rootDoc), 90000);
+      if (got === 'reward') { const p = {}; p[key] = 'confirmed'; setMState(p); rec(taskId, 'success', ''); return; }
+      if (got === 'dup') { setMState({ rainbow: 'confirmed', vip: 'confirmed' }); rec(taskId, 'done', ''); return; }
+      rec(taskId, 'waiting', '已发送，等青虫娘回复（不重复发送）');
       return;
     }
-    const res = await runPair(rootDoc, 'monthly', '青虫娘，求彩虹ID', '青虫娘，求vip');
-    if (!res) return;
-    const nd = new Date(due.getTime());
-    nd.setMonth(nd.getMonth() + 1);
-    if (nd.getTime() <= Date.now()) nd.setTime(Date.now() + 30 * 24 * 3600 * 1000);
-    monthly.cyanbug.due = nd.toISOString();
-    set('monthly', monthly);
-    if (res.allDup) rec('monthly', 'done', '机器人回复已领过类提示，按已处理记账；下次到期已推算为 ' + bjDate(nd) + '（推算值）。' + res.detail);
-    else rec('monthly', 'success', res.detail + '；下次到期已推算为 ' + bjDate(nd) + '（推算值，待官方时间校正）');
+    const input = chatInputIn(rootDoc);
+    const btn = chatSendBtn(input);
+    if (!input || !btn) { rec(taskId, 'failed', '没找到群聊输入框或发送按钮（需要校准）'); return; }
+    const lastChat2 = get('cyanbugLastChatTs', 0);
+    if (lastChat2 && Date.now() - lastChat2 < 70000) { rec(taskId, 'waiting', '等聊天框70秒间隔（每日与月度群聊共用一个聊天框）'); await sleep(70000 - (Date.now() - lastChat2)); }
+    const before = replyState(rootDoc);
+    const patch = {}; patch[key] = 'sent'; patch[key + 'Ts'] = Date.now(); setMState(patch); // 先落状态再发送
+    rec(taskId, 'running', '发送：' + msg);
+    setValue(input, msg);
+    await pause();
+    btn.click();
+    set('cyanbugLastChatTs', Date.now());
+    const got = await waitReply(rootDoc, before, 300000);
+    if (got === 'reward') { const p = {}; p[key] = 'confirmed'; setMState(p); rec(taskId, 'success', ''); return; }
+    if (got === 'dup') { setMState({ rainbow: 'confirmed', vip: 'confirmed' }); rec(taskId, 'done', ''); return; }
+    rec(taskId, 'waiting', '已发送，等了5分钟没等到回复，没有重发');
   }
+  async function doMonthlyTask(taskId, key, msg) {
+    const st = await readMonthlyStatus();
+    if (st) {
+      syncDueFromStatus(st);
+      const end = key === 'rainbow' ? st.rainbowEnd : st.vipEnd;
+      if (end && new Date(end).getTime() > Date.now()) { rec(taskId, 'active', daysLeft(end) + '天过期'); return; }
+      await withHome(d => monthlyOne(d, taskId, key, msg, end || 'none'));
+      return;
+    }
+    /* 读不到详情页时退回存着的到期日判断，不盲目发送 */
+    const due = monthlyDue();
+    if (Date.now() < new Date(due).getTime()) { rec(taskId, 'notdue', '还没到期，下次到期 ' + bjDate(new Date(due)) + '（暂时读不到详情页，按存着的到期日判断）'); return; }
+    await withHome(d => monthlyOne(d, taskId, key, msg, 'due:' + due));
+  }
+  async function doMRainbow() { await doMonthlyTask('mrainbow', 'rainbow', '青虫娘，求彩虹ID'); }
+  async function doMVip() { await doMonthlyTask('mvip', 'vip', '青虫娘，求vip'); }
   async function withHome(fn) {
     const p = location.pathname;
     if (p === '/' || p.indexOf('index.php') >= 0) { await fn(document); return; }
@@ -254,28 +272,28 @@
   async function doFunbox() { await withHome(funboxIn); }
   async function doChatUp() { await withHome(chatUpIn); }
   async function doChatMagic() { await withHome(chatMagicIn); }
-  async function doMonthly() {
+  async function doMonthlyTask(taskId, fn) {
     /* 未到期只记账、不必打开首页 */
-    const monthly = get('monthly', {});
-    const dueStr = (monthly.cyanbug && monthly.cyanbug.due) || '2026-11-23T00:00:00+08:00';
-    if (Date.now() < new Date(dueStr).getTime()) {
-      if (!monthly.cyanbug) { monthly.cyanbug = { due: dueStr }; set('monthly', monthly); }
-      rec('monthly', 'notdue', '还没到期，下次到期 ' + bjDate(new Date(dueStr)) + '，到期后打开本站任意页自动执行');
+    if (Date.now() < new Date(monthlyDue()).getTime()) {
+      rec(taskId, 'notdue', '还没到期，下次到期 ' + bjDate(new Date(monthlyDue())) + '，到期后打开本站任意页自动执行');
       return;
     }
-    await withHome(monthlyIn);
+    await withHome(fn);
   }
+  async function doMRainbow() { await doMonthlyTask('mrainbow', mRainbowIn); }
+  async function doMVip() { await doMonthlyTask('mvip', mVipIn); }
 
-  const runners = { funbox: doFunbox, chatup: doChatUp, chatmagic: doChatMagic, monthly: doMonthly };
+  function isMonthlyTask(task) { return task === 'mrainbow' || task === 'mvip'; }
+  const runners = { funbox: doFunbox, chatup: doChatUp, chatmagic: doChatMagic, mrainbow: doMRainbow, mvip: doMVip };
   async function run(task, force) {
     if (isPaused()) return;
     if (finished(task)) return; // 已成功/已完成的任务绝不重复执行（包括自动重试与手动重试触发时）
-    if (task !== 'monthly' && !force && attempts(task) >= 3) return;
+    if (!isMonthlyTask(task) && !force && attempts(task) >= 3) return;
     if (!claim()) return;
-    const n = task === 'monthly' ? 1 : bumpAttempt(task);
+    const n = isMonthlyTask(task) ? 1 : bumpAttempt(task);
     try { await runners[task](); } catch (e) { rec(task, 'failed', '脚本出错：' + (e && e.message ? e.message : e)); }
     const r = todayRec(task);
-    if (r && r.status === 'failed' && n < 3 && task !== 'monthly') {
+    if (r && r.status === 'failed' && n < 3 && !isMonthlyTask(task)) {
       if (n === 1) setTimeout(() => run(task, true), 20000 + Math.random() * 15000);
       else setTimeout(() => { try { location.reload(); } catch (e) {} }, 15000 + Math.random() * 15000);
     }
@@ -286,13 +304,21 @@
     await run('funbox', false);
     await run('chatup', false);
     await run('chatmagic', false);
-    await run('monthly', false);
+    await run('mrainbow', false);
+    await run('mvip', false);
     captureStreak();
   }
   try {
+    let lastRetryTs = 0;
     GM_addValueChangeListener('retryReq', function (name, oldV, newV) {
       const req = newV && newV[SITE.id];
-      if (req && Date.now() - req.ts < 300000 && runners[req.task]) { resetAttempts(req.task); run(req.task, true); }
+      if (req && req.ts > lastRetryTs && Date.now() - req.ts < 300000 && runners[req.task]) {
+        lastRetryTs = req.ts;
+        /* 先落“今天重试过”章再执行，并删掉自己的请求条目：防任何后续存储变化把它重复触发（重复执行可能被网站限流） */
+        const rd = get('retryDone', {}); const dd = bjDate(); if (!rd[dd]) rd[dd] = {}; rd[dd][SITE.id + '/' + req.task] = 1; set('retryDone', rd);
+        const rq = get('retryReq', {}); delete rq[SITE.id]; set('retryReq', rq);
+        resetAttempts(req.task); run(req.task, true);
+      }
     });
   } catch (e) {}
   main();

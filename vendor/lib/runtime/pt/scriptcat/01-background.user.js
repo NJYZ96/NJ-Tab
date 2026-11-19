@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-后台定时
 // @namespace    nj.checkin
-// @version      1.0.2
+// @version      1.0.3
 // @description  每小时检查：月度任务到期开页执行、CarPT天天快乐到期开页续领、每日汇总通知、清理旧账本
 // @author       momo
 // @crontab      7 * * * *
@@ -51,8 +51,9 @@
     const opened = get('monthlyOpened', {});
     if (cb.due && new Date(cb.due).getTime() <= Date.now() && opened.date !== today) {
       const ledger = get('ledger', {});
-      const rec = (((ledger[today] || {}).cyanbug || {}).monthly) || null;
-      if (!rec || (rec.status !== 'success' && rec.status !== 'done')) {
+      const cbRecs = ((ledger[today] || {}).cyanbug || {});
+      const mDone = ['mrainbow', 'mvip'].every(k => { const r = cbRecs[k]; return r && (r.status === 'success' || r.status === 'done' || r.status === 'active'); });
+      if (!mDone) {
         GM_openInTab('https://cyanbug.net/index.php', true);
         opened.date = today;
         set('monthlyOpened', opened);
@@ -88,7 +89,7 @@
         (reg.tasks || []).forEach(t => {
           total++;
           const r = (day[siteId] || {})[t.id];
-          if (r && (r.status === 'success' || r.status === 'done' || r.status === 'notdue')) okCount++;
+          if (r && (r.status === 'success' || r.status === 'done' || r.status === 'notdue' || r.status === 'active')) okCount++;
           else if (r && (r.status === 'failed' || r.status === 'manual')) problems.push(reg.name + '-' + t.name + '：' + (r.status === 'manual' ? '需要手动' : '失败') + (r.detail ? '（' + r.detail + '）' : ''));
           else problems.push(reg.name + '-' + t.name + '：今天还没执行');
         });

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-总面板
 // @namespace    nj.checkin
-// @version      1.0.4
+// @version      1.0.5
 // @description  汇总显示所有站点脚本今天的执行情况（只读账本，不执行站点动作）。面板可点按钮开关、点面板外自动关闭；主题为右上角图标按钮（自动/白天/暗黑，默认自动），面板按钮跟随主题配色；在哪个站打开面板，哪个站置顶显示
 // @author       momo
 // @match        *://pt.btschool.club/*
@@ -60,6 +60,9 @@
     'cyanbug.net': 'cyanbug', 'longpt.org': 'longpt', 'pt.0ff.cc': 'farmm', 'carpt.net': 'carpt'
   };
 
+  const PANEL_VER = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '';
+  /* 点网站名跳该站首页 */
+  const SITE_HOME = { btschool: 'https://pt.btschool.club/', mteam: 'https://kp.m-team.cc/', nicept: 'https://www.nicept.net/', hdbao: 'https://hdbao.cc/', haidan: 'https://www.haidan.cc/', rousipro: 'https://rousi.pro/', cyanbug: 'https://cyanbug.net/', longpt: 'https://longpt.org/', farmm: 'https://pt.0ff.cc/', carpt: 'https://carpt.net/' };
   const STATUS = {
     success: ['已完成', '#2e9e4f'],
     novote: ['无需投票', '#2e9e4f'],
@@ -69,6 +72,7 @@
     running: ['执行中', '#e69500'],
     waiting: ['等待中', '#e69500'],
     notdue: ['未到期', '#888'],
+    active: ['生效中', '#2e9e4f'],
     none: ['未执行', '#888']
   };
 
@@ -79,7 +83,7 @@
     const rows = tasks.map(t => {
       const r = recs[t.id];
       const st = r ? r.status : 'none';
-      if (st === 'success' || st === 'done' || st === 'notdue' || st === 'novote') ok++;
+      if (st === 'success' || st === 'done' || st === 'notdue' || st === 'novote' || st === 'active') ok++;
       else if (st === 'failed' || st === 'manual') bad++;
       else pending++;
       return { task: t, rec: r, status: st };
@@ -117,7 +121,7 @@
     const curId = HOST2SITE[location.hostname] || '';
     const BS = 'background:' + P.btnBg + ';color:' + P.fg + ';border:1px solid ' + P.border + ';border-radius:6px;padding:2px 10px;cursor:pointer;font-size:12px;';
     let nAll = 0, nPart = 0, nFail = 0, nNone = 0;
-    let html = '<div style="font-weight:bold;font-size:15px;margin-bottom:6px;">今日总览（' + today + '）' +
+    let html = '<div style="font-weight:bold;font-size:15px;margin-bottom:6px;">今日总览（' + today + '）' + (PANEL_VER ? ' <span style="font-size:11px;font-weight:normal;color:' + P.faint + ';">面板 v' + PANEL_VER + '</span>' : '') +
       '<button data-act="theme" title="主题：' + THEME_NAME[themeMode()] + '（点按切换）" style="float:right;font-weight:normal;font-size:14px;' + BS + '">' + THEME_ICON[themeMode()] + '</button></div>';
     let sitesHtml = '';
     siteIds.sort((a, b) => (a === curId ? -1 : (b === curId ? 1 : (a < b ? -1 : 1)))).forEach(id => {
@@ -130,16 +134,22 @@
       const isPaused = !!paused[id];
       const info = siteInfo[id] || {};
       const streakTxt = (info.cont != null || info.total != null) ? '：连续/累计签到（' + (info.cont != null ? info.cont : '-') + ' / ' + (info.total != null ? info.total : '-') + '）' : '';
+      const nameHtml = SITE_HOME[id] ? '<a href="' + SITE_HOME[id] + '" target="_blank" rel="noopener" style="color:' + P.fg + ';text-decoration:none;border-bottom:1px dashed ' + P.sub + ';">' + reg.name + '</a>' : reg.name;
       sitesHtml += '<div style="border-top:1px solid ' + P.hr + ';padding:6px 0;">' +
-        '<div><b>' + reg.name + '</b>' + (id === curId ? ' <span style="color:#2e9e4f;font-weight:bold;">（本站）</span>' : '') + streakTxt + ' <span style="color:' + sum.level[1] + ';font-weight:bold;">' + sum.level[0] + '</span>' +
+        '<div><b>' + nameHtml + '</b>' + (reg.version ? ' <span style="font-size:11px;color:' + P.faint + ';">v' + reg.version + '</span>' : '') + (id === curId ? ' <span style="color:#2e9e4f;font-weight:bold;">（本站）</span>' : '') + streakTxt + ' <span style="color:' + sum.level[1] + ';font-weight:bold;">' + sum.level[0] + '</span>' +
         (isPaused ? ' <span style="color:' + P.faint + ';">（已暂停）</span>' : '') +
         ' <button data-act="pause" data-site="' + id + '" style="float:right;' + BS + '">' + (isPaused ? '恢复' : '暂停') + '</button></div>';
       sum.rows.forEach(row => {
         const st = STATUS[row.status] || STATUS.none;
+        /* 成功类状态不显示说明文字（只有“获得 N 魔力”和 CarPT 进行中这类有用信息例外）；失败/等待才显示原因 */
+        let detail = row.rec ? (row.rec.detail || '') : '';
+        if (row.status === 'success' || row.status === 'done' || row.status === 'novote') {
+          if (!/^(获得 [\d,]+ 魔力|任务：进行中)/.test(detail)) detail = '';
+        }
         sitesHtml += '<div style="margin-left:12px;font-size:12px;">· ' + row.task.name +
           '：<span style="color:' + st[1] + ';">' + st[0] + '</span>' +
-          (row.rec ? ' <span style="color:' + P.sub + ';">' + (row.rec.time || '') + ' ' + (row.rec.detail || '') + '</span>' : '') +
-          ((row.status === 'failed' || row.status === 'manual') ? ' <button data-act="retry" data-site="' + id + '" data-task="' + row.task.id + '" style="' + BS + '">重试</button>' : '') +
+          (row.rec ? ' <span style="color:' + P.sub + ';">' + (row.rec.time || '') + (detail ? ' ' + detail : '') + '</span>' : '') +
+          ((row.status === 'failed' || row.status === 'manual') ? ' <button data-act="retry" data-site="' + id + '" data-task="' + row.task.id + '" style="' + BS + '">' + ((retryDoneMap()[today] || {})[id + '/' + row.task.id] ? '今天已重试' : '重试') + '</button>' : '') +
           '</div>';
       });
       sitesHtml += '</div>';
@@ -156,7 +166,8 @@
       panelEl = document.createElement('div');
       panelEl.style.cssText = 'position:fixed;top:60px;right:16px;width:360px;max-height:75vh;overflow:auto;border:1px solid #bbb;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);z-index:2147483647;padding:12px;font-size:13px;line-height:1.5;';
       document.body.appendChild(panelEl);
-      panelEl.addEventListener('click', e => {
+      function retryDoneMap() { return get('retryDone', {}); }
+  panelEl.addEventListener('click', e => {
         const btn = e.target.closest('button');
         if (!btn) return;
         const act = btn.getAttribute('data-act');
@@ -176,6 +187,8 @@
           render();
         }
         if (act === 'retry') {
+          const rkey = btn.getAttribute('data-site') + '/' + btn.getAttribute('data-task');
+          if ((retryDoneMap()[bjDate()] || {})[rkey]) { btn.textContent = '今天已重试'; btn.disabled = true; return; } // 今天已重试过就不再发（防重复执行）
           const req = get('retryReq', {});
           req[btn.getAttribute('data-site')] = { task: btn.getAttribute('data-task'), ts: Date.now() };
           set('retryReq', req);

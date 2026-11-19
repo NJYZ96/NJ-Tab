@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-M-Team
 // @namespace    nj.checkin
-// @version      1.0.4
+// @version      1.0.5
 // @description  M-Team 趣味盒点赞投票（两个数字按钮：第一个是点赞、第二个是点踩；成功标志：点赞数+1且两个按钮都变不可点），结果写入共享账本。失败自动重试（原地→刷新，一天最多3次）；不在首页时后台打开首页完成
 // @author       momo
 // @match        *://kp.m-team.cc/*
@@ -23,9 +23,9 @@
   function bjTime(d) { d = d || new Date(); const b = new Date(d.getTime() + (d.getTimezoneOffset() + 480) * 60000); const p = n => String(n).padStart(2, '0'); return p(b.getHours()) + ':' + p(b.getMinutes()) + ':' + p(b.getSeconds()); }
   function get(k, def) { try { const v = GM_getValue(k); return v === undefined ? def : v; } catch (e) { return def; } }
   function set(k, v) { try { GM_setValue(k, v); } catch (e) {} }
-  function rec(task, status, detail) { const L = get('ledger', {}); const day = bjDate(); if (!L[day]) L[day] = {}; if (!L[day][SITE.id]) L[day][SITE.id] = {}; L[day][SITE.id][task] = { status: status, time: bjTime(), detail: detail || '' }; set('ledger', L); }
+  function rec(task, status, detail) { const L = get('ledger', {}); const day = bjDate(); if (!L[day]) L[day] = {}; if (!L[day][SITE.id]) L[day][SITE.id] = {}; const cur = L[day][SITE.id][task]; /* 写前复查：今天已是完成态（成功/已完成/无需投票）的记录，不许被未完成状态盖掉——防旧流程或重复运行把好记录冲成失败 */ if (cur && (cur.status === 'success' || cur.status === 'done' || cur.status === 'novote') && status !== 'success' && status !== 'done' && status !== 'novote') return; L[day][SITE.id][task] = { status: status, time: bjTime(), detail: detail || '' }; set('ledger', L); }
   function todayRec(task) { const L = get('ledger', {}); const d = L[bjDate()] || {}; const s = d[SITE.id] || {}; return s[task] || null; }
-  function register() { const r = get('registry', {}); r[SITE.id] = { name: SITE.name, tasks: SITE.tasks }; set('registry', r); }
+  function register() { const r = get('registry', {}); r[SITE.id] = { name: SITE.name, tasks: SITE.tasks, version: (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '' }; set('registry', r); }
   function isPaused() { return !!get('paused', {})[SITE.id]; }
   function claim() { const locks = get('locks', {}); const cur = locks[SITE.id]; const now = Date.now(); if (cur && now - cur.ts < 600000 && cur.owner !== TAB) return false; locks[SITE.id] = { ts: now, owner: TAB }; set('locks', locks); return true; }
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -113,9 +113,16 @@
     for (const t of SITE.tasks) await run(t.id, false);
   }
   try {
+    let lastRetryTs = 0;
     GM_addValueChangeListener('retryReq', function (name, oldV, newV) {
       const req = newV && newV[SITE.id];
-      if (req && Date.now() - req.ts < 300000 && runners[req.task]) { resetAttempts(req.task); run(req.task, true); }
+      if (req && req.ts > lastRetryTs && Date.now() - req.ts < 300000 && runners[req.task]) {
+        lastRetryTs = req.ts;
+        /* 先落“今天重试过”章再执行，并删掉自己的请求条目：防任何后续存储变化把它重复触发（重复执行可能被网站限流） */
+        const rd = get('retryDone', {}); const dd = bjDate(); if (!rd[dd]) rd[dd] = {}; rd[dd][SITE.id + '/' + req.task] = 1; set('retryDone', rd);
+        const rq = get('retryReq', {}); delete rq[SITE.id]; set('retryReq', rq);
+        resetAttempts(req.task); run(req.task, true);
+      }
     });
   } catch (e) {}
   main();
