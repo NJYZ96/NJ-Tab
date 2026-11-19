@@ -1,17 +1,11 @@
 // ==UserScript==
 // @name         每日签到-论坛总面板
 // @namespace    nj.checkin
-// @version      1.0.0
+// @version      1.0.1
 // @description  汇总显示论坛类站点脚本今天的执行情况（只读账本，不执行站点动作）。面板可点按钮开关、点面板外自动关闭；主题为右上角图标按钮（自动/白天/暗黑，默认自动），面板按钮跟随主题配色；在哪个站打开面板，哪个站置顶显示
 // @author       momo
-// @match        *://xsijishe.net/*
-// @match        *://ycoo.net/*
 // @grant        GM_setValue
-// @match        *://xsijishe.net/*
-// @match        *://ycoo.net/*
 // @grant        GM_getValue
-// @match        *://xsijishe.net/*
-// @match        *://ycoo.net/*
 // @grant        GM_addValueChangeListener
 // @match        *://xsijishe.net/*
 // @match        *://ycoo.net/*
@@ -24,6 +18,7 @@
   'use strict';
   if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框里重复运行
 
+  function retryDoneMap() { return get('retryDone', {}); }
   function bjDate(d) {
     d = d || new Date();
     const b = new Date(d.getTime() + (d.getTimezoneOffset() + 480) * 60000);
@@ -162,7 +157,6 @@
       panelEl = document.createElement('div');
       panelEl.style.cssText = 'position:fixed;top:60px;right:16px;width:360px;max-height:75vh;overflow:auto;border:1px solid #bbb;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);z-index:2147483647;padding:12px;font-size:13px;line-height:1.5;';
       document.body.appendChild(panelEl);
-      function retryDoneMap() { return get('retryDone', {}); }
   panelEl.addEventListener('click', e => {
         const btn = e.target.closest('button');
         if (!btn) return;

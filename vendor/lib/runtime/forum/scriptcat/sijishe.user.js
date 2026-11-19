@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-Sijishe司机社
 // @namespace    nj.checkin
-// @version      1.0.1
+// @version      1.0.2
 // @description  司机社（论坛类）每日签到。本站任意页打开都会补做。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本（总面板可看）
 // @author       momo
 // @match        *://xsijishe.net/*
@@ -63,10 +63,15 @@
     return els.filter(el => {
       if ((el.textContent || '').trim() !== '签到') return false;
       const href = el.getAttribute && el.getAttribute('href') || '';
-      if (href.indexOf('k_misign') >= 0) return false; // 导航里的“签到”链接指向签到页本身，不是签到动作
+      if (href.indexOf('k_misign') >= 0 && href.indexOf('operation=') < 0) return false; // 只排除跳到签到页本身的导航链接；带 operation 的是签到动作链接，必须留
       if (el.closest && el.closest('header,nav')) return false;
       return el.offsetWidth > 0;
-    }).sort((a, b) => (a.offsetWidth * a.offsetHeight) - (b.offsetWidth * b.offsetHeight));
+    }).sort((a, b) => {
+      const ao = ((a.getAttribute && a.getAttribute('href') || '').indexOf('operation=qiandao') >= 0) ? 0 : 1;
+      const bo = ((b.getAttribute && b.getAttribute('href') || '').indexOf('operation=qiandao') >= 0) ? 0 : 1;
+      if (ao !== bo) return ao - bo;
+      return (a.offsetWidth * a.offsetHeight) - (b.offsetWidth * b.offsetHeight);
+    });
   }
   function signBtn(doc) {
     // 先在状态文字附近找
@@ -83,12 +88,22 @@
     const c = signCandidates(doc);
     return c.length ? c[0] : null;
   }
+  function nearMiss(doc) {
+    const out = [];
+    const els = Array.from(doc.querySelectorAll('a,button,div,span'));
+    for (const el of els) {
+      const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (t && t.indexOf('签到') >= 0 && t.length <= 40 && out.indexOf(t) < 0) out.push(t);
+      if (out.length >= 3) break;
+    }
+    return out.join(' / ');
+  }
   async function checkinIn(doc) {
     const t0 = docText(doc);
     streakFromText(t0);
     if (!notSigned(t0)) { rec('checkin', 'done', rewardDetail(t0)); return; } // 没有“您今天还没有签到”＝今天已签到
     const btn = signBtn(doc);
-    if (!btn) { rec('checkin', 'failed', '页面显示未签到，但没找到签到按钮（需要校准）'); return; }
+    if (!btn) { rec('checkin', 'failed', '没找到签到按钮；页面上带“签到”的文字：' + nearMiss(doc)); return; }
     rec('checkin', 'running', '点击签到');
     await pause();
     btn.click();
