@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-Ycoo源论坛
 // @namespace    nj.checkin
-// @version      1.0.0
+// @version      1.0.1
 // @description  源论坛（论坛类，开源阅读社区）每日签到。本站任意页打开都会补做。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本（总面板可看）
 // @author       momo
 // @match        *://ycoo.net/*
@@ -15,7 +15,7 @@
 (function () {
   'use strict';
   if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框里重复运行
-  const SITE = { id: 'ycoo', name: 'Ycoo-源论坛（开源阅读）', tasks: [{ id: 'checkin', name: '每日签到' }] };
+  const SITE = { id: 'ycoo', name: 'Ycoo-源论坛', tasks: [{ id: 'checkin', name: '每日签到' }] };
   const SIGN_URL = 'https://ycoo.net/k_misign-sign.html?mobile=no';
   function tabId() { try { let t = sessionStorage.getItem('nj-tab-id'); if (!t) { t = Math.random().toString(36).slice(2); sessionStorage.setItem('nj-tab-id', t); } return t; } catch (e) { return 'x' + Math.random().toString(36).slice(2); } }
   const TAB = tabId();
