@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-RousiPro
 // @namespace    nj.checkin
-// @version      1.0.3
+// @version      1.0.4
 // @description  RousiPro 每日签到：先选“随机”并验证选中，再点立即签到；成功说明记页面上的真实奖励句。本站任意页打开都会补做。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本
 // @author       momo
 // @match        *://rousi.pro/*
@@ -15,7 +15,7 @@
 (function () {
   'use strict';
   if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框里重复运行
-  const SITE = { id: 'rousipro', name: 'RousiPro', tasks: [{ id: 'checkin', name: '每日签到（随机）' }] };
+  const SITE = { id: 'rousipro', name: 'Rousi-肉丝', tasks: [{ id: 'checkin', name: '每日签到（随机）' }] };
   const SIGN_URL = 'https://rousi.pro/account/economy?tab=attendance';
   function tabId() { try { let t = sessionStorage.getItem('nj-tab-id'); if (!t) { t = Math.random().toString(36).slice(2); sessionStorage.setItem('nj-tab-id', t); } return t; } catch (e) { return 'x' + Math.random().toString(36).slice(2); } }
   const TAB = tabId();
@@ -48,7 +48,7 @@
   function saveStreak(cont, total) { if (cont == null && total == null) return; const info = get('siteInfo', {}); const cur = info[SITE.id] || {}; if (cont != null) cur.cont = cont; if (total != null) cur.total = total; info[SITE.id] = cur; set('siteInfo', info); }
   function streakFromText(t) { if (!t) return; const cm = t.match(/连续签到\s*(\d+)\s*天/) || t.match(/已连续\s*(\d+)\s*天/) || t.match(/连续\s*(\d+)\s*天/) || t.match(/(\d+)\s*天\s*连续签到/); const tm = t.match(/累计签到\s*(\d+)\s*天/) || t.match(/累计\s*(\d+)\s*天/) || t.match(/第\s*(\d+)\s*次签到/) || t.match(/(\d+)\s*次\s*累计签到/); saveStreak(cm ? parseInt(cm[1], 10) : null, tm ? parseInt(tm[1], 10) : null); }
   /* 页面上的真实奖励句，如“今日获得 212 魔力值，基础奖励 212，并获得 1 经验。” */
-  function rewardText(doc) { const t = docText(doc); const m1 = t.match(/今日获得\s*[\d,]+\s*魔力值/); const m2 = t.match(/基础奖励\s*[\d,]+\s*，并获得\s*\d+\s*经验。?/); if (m1 && m2) return m1[0] + '，' + m2[0]; if (m1) return m1[0]; return ''; }
+  function rewardText(doc) { const t = docText(doc); const mm = t.match(/今日获得\s*([\d,]+)\s*魔力值/) || t.match(/基础奖励\s*([\d,]+)/); const em = t.match(/并获得\s*([\d,]+)\s*经验/); if (mm && em) return '获得 ' + mm[1] + ' 魔力，并获得 ' + em[1] + ' 经验'; if (mm) return '获得 ' + mm[1] + ' 魔力'; return ''; }
   function openRemote(url) {
     return new Promise(resolve => {
       const ifr = document.createElement('iframe');
@@ -86,7 +86,7 @@
 
   async function doCheckinIn(doc) {
     const already = await waitFor(() => docText(doc).indexOf('今日已签到') >= 0, 4000);
-    if (already) { streakFromText(docText(doc)); const rw0 = rewardText(doc); rec('checkin', 'done', rw0 || '页面已显示“今日已签到”'); return; }
+    if (already) { streakFromText(docText(doc)); const rw0 = rewardText(doc); rec('checkin', 'done', rw0 || ''); return; }
     const signBtn = findBtn(doc, ['立即签到']);
     /* 路线一：真单选圈（旧结构兜底） */
     const randomRadio = doc.querySelector('input[type="radio"][value="random"]');
@@ -101,7 +101,7 @@
       await pause();
       signBtn.click();
       const ok = await waitFor(() => docText(doc).indexOf('今日已签到') >= 0 || docText(doc).indexOf('今日获得') >= 0, 12000);
-      if (ok) { streakFromText(docText(doc)); const rw = rewardText(doc); rec('checkin', 'success', rw || '以随机方式签到，页面出现“今日已签到/今日获得”'); }
+      if (ok) { streakFromText(docText(doc)); const rw = rewardText(doc); rec('checkin', 'success', rw || ''); }
       else rec('checkin', 'failed', '点完后没看到已签到字样');
       return;
     }
@@ -127,7 +127,7 @@
     await pause();
     signBtn.click();
     const ok = await waitFor(() => docText(doc).indexOf('今日已签到') >= 0 || docText(doc).indexOf('今日获得') >= 0, 12000);
-    if (ok) { streakFromText(docText(doc)); const rw2 = rewardText(doc); rec('checkin', 'success', rw2 || '以随机方式签到，页面出现“今日已签到/今日获得”'); }
+    if (ok) { streakFromText(docText(doc)); const rw2 = rewardText(doc); rec('checkin', 'success', rw2 || ''); }
     else rec('checkin', 'failed', '点完后没看到已签到字样');
   }
 

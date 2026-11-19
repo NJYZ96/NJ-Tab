@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-HDBao
 // @namespace    nj.checkin
-// @version      1.0.3
+// @version      1.0.4
 // @description  HDBao 签到（隐藏框打开签到页点立即签到）+ 趣味盒投票。本站任意页打开都会补做。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本
 // @author       momo
 // @match        *://hdbao.cc/*
@@ -15,7 +15,7 @@
 (function () {
   'use strict';
   if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框里重复运行
-  const SITE = { id: 'hdbao', name: 'HDBao', tasks: [{ id: 'checkin', name: '每日签到' }, { id: 'funbox', name: '趣味盒投票' }] };
+  const SITE = { id: 'hdbao', name: 'HDBao-宝', tasks: [{ id: 'checkin', name: '每日签到' }, { id: 'funbox', name: '趣味盒投票' }] };
   const HOME_URL = 'https://hdbao.cc/index.php';
   function tabId() { try { let t = sessionStorage.getItem('nj-tab-id'); if (!t) { t = Math.random().toString(36).slice(2); sessionStorage.setItem('nj-tab-id', t); } return t; } catch (e) { return 'x' + Math.random().toString(36).slice(2); } }
   const TAB = tabId();
@@ -61,18 +61,19 @@
   }
   function closeRemote(ifr) { try { ifr.remove(); } catch (e) {} }
 
+  function rewardDetail(t) { const m = (t || '').match(/签到已得\s*([\d,]+)/) || (t || '').match(/\+\s*([\d,]+)\s*魔力/); return m ? '获得 ' + m[1] + ' 魔力' : ''; }
   async function doCheckin() {
-    if (pageText().indexOf('[签到已得') >= 0) { rec('checkin', 'done', '页面顶部已显示“[签到已得”，今天已签到'); return; }
+    if (pageText().indexOf('[签到已得') >= 0) { rec('checkin', 'done', rewardDetail(pageText())); return; }
     /* 人正在签到页上就直接在本页点 */
     if (location.pathname.indexOf('attendance') >= 0) {
-      if (pageText().indexOf('签到成功') >= 0) { streakFromText(pageText()); rec('checkin', 'done', '签到页显示签到成功，今天已签到'); return; }
+      if (pageText().indexOf('签到成功') >= 0) { streakFromText(pageText()); rec('checkin', 'done', rewardDetail(pageText())); return; }
       const selfBtn = findBtn(document, ['立即签到']);
       if (selfBtn) {
         rec('checkin', 'running', '在签到页点击立即签到');
         await pause();
         selfBtn.click();
         const okSelf = await waitFor(() => pageText().indexOf('签到成功') >= 0, 15000);
-        if (okSelf) { streakFromText(pageText()); rec('checkin', 'success', '点“立即签到”后页面显示签到成功'); return; }
+        if (okSelf) { streakFromText(pageText()); rec('checkin', 'success', rewardDetail(pageText())); return; }
         rec('checkin', 'failed', '点完后没看到签到成功字样');
         return;
       }
@@ -87,7 +88,7 @@
         try { const d = frame.contentDocument; return d && d.body && docText(d).length > 0 ? d : null; } catch (e) { return null; }
       }, 15000);
       if (!doc) { rec('checkin', 'failed', '签到页打不开'); return; }
-      if (docText(doc).indexOf('签到成功') >= 0) { streakFromText(docText(doc)); rec('checkin', 'done', '签到页显示签到成功，今天已签到'); return; }
+      if (docText(doc).indexOf('签到成功') >= 0) { streakFromText(docText(doc)); rec('checkin', 'done', rewardDetail(docText(doc))); return; }
       const btn = findBtn(doc, ['立即签到']);
       if (!btn) { rec('checkin', 'failed', '签到页没找到“立即签到”按钮'); return; }
       await pause();
@@ -95,7 +96,7 @@
       const ok = await waitFor(() => {
         try { return docText(frame.contentDocument).indexOf('签到成功') >= 0; } catch (e) { return false; }
       }, 15000);
-      if (ok) { try { streakFromText(docText(frame.contentDocument)); } catch (e) {} rec('checkin', 'success', '点“立即签到”后签到页显示签到成功'); }
+      if (ok) { let dt = ''; try { dt = docText(frame.contentDocument); streakFromText(dt); } catch (e) {} rec('checkin', 'success', rewardDetail(dt)); }
       else rec('checkin', 'failed', '点完后没看到签到成功字样');
     } finally {
       setTimeout(() => { try { frame.remove(); } catch (e) {} }, 1000);
@@ -117,7 +118,7 @@
       if (inner) btn = findBtn(inner, ['有趣']);
     }
     if (!btn) {
-      if (docText(doc).indexOf('认为它有趣') >= 0) { rec('funbox', 'done', '趣味盒没有投票按钮，说明已投过'); return; }
+      if (docText(doc).indexOf('认为它有趣') >= 0) { rec('funbox', 'novote', ''); return; }
       rec('funbox', 'failed', '没找到趣味盒投票按钮');
       return;
     }
@@ -125,7 +126,7 @@
     await pause();
     btn.click();
     const ok = await waitFor(() => !findBtn(doc, ['有趣']) || docText(doc).indexOf('谢谢！你的投票已提交') >= 0 || docText(doc).indexOf('你觉得呢') < 0, 12000);
-    if (ok) rec('funbox', 'success', '点“有趣”后按钮消失/出现谢谢提示');
+    if (ok) rec('funbox', 'success', '');
     else rec('funbox', 'failed', '点完后按钮还在，投票可能没成功');
   }
   async function doFunbox() {

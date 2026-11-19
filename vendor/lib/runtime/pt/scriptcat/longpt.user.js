@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-LongPT
 // @namespace    nj.checkin
-// @version      1.0.3
+// @version      1.0.4
 // @description  LongPT 每日抽奖（核获奖记录最新一条：须今天创建且“等待开奖”）+ 喊话“求上传”（只认自己存的状态防重复提交；页面提示“已经喊过”即记已完成）。本站任意页打开都会补做。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本
 // @author       momo
 // @match        *://longpt.org/*
@@ -15,7 +15,7 @@
 (function () {
   'use strict';
   if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框里重复运行
-  const SITE = { id: 'longpt', name: 'LongPT', tasks: [{ id: 'lottery', name: '每日抽奖' }, { id: 'shout', name: '喊话求上传' }] };
+  const SITE = { id: 'longpt', name: 'LongPT-龙站', tasks: [{ id: 'lottery', name: '每日抽奖' }, { id: 'shout', name: '喊话求上传' }] };
   const PLUGINS_URL = 'https://longpt.org/plugins/index';
   function tabId() { try { let t = sessionStorage.getItem('nj-tab-id'); if (!t) { t = Math.random().toString(36).slice(2); sessionStorage.setItem('nj-tab-id', t); } return t; } catch (e) { return 'x' + Math.random().toString(36).slice(2); } }
   const TAB = tabId();

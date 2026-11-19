@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-总面板
 // @namespace    nj.checkin
-// @version      1.0.3
+// @version      1.0.4
 // @description  汇总显示所有站点脚本今天的执行情况（只读账本，不执行站点动作）。面板可点按钮开关、点面板外自动关闭；主题为右上角图标按钮（自动/白天/暗黑，默认自动），面板按钮跟随主题配色；在哪个站打开面板，哪个站置顶显示
 // @author       momo
 // @match        *://pt.btschool.club/*
@@ -61,9 +61,10 @@
   };
 
   const STATUS = {
-    success: ['成功', '#2e9e4f'],
+    success: ['已完成', '#2e9e4f'],
+    novote: ['无需投票', '#2e9e4f'],
     done: ['已完成', '#2e9e4f'],
-    failed: ['失败', '#d33'],
+    failed: ['未完成', '#d33'],
     manual: ['需要手动', '#d33'],
     running: ['执行中', '#e69500'],
     waiting: ['等待中', '#e69500'],
@@ -78,7 +79,7 @@
     const rows = tasks.map(t => {
       const r = recs[t.id];
       const st = r ? r.status : 'none';
-      if (st === 'success' || st === 'done' || st === 'notdue') ok++;
+      if (st === 'success' || st === 'done' || st === 'notdue' || st === 'novote') ok++;
       else if (st === 'failed' || st === 'manual') bad++;
       else pending++;
       return { task: t, rec: r, status: st };
@@ -128,7 +129,7 @@
       else nPart++;
       const isPaused = !!paused[id];
       const info = siteInfo[id] || {};
-      const streakTxt = (info.cont != null || info.total != null) ? '：连续/累计签到（' + (info.cont != null ? info.cont : '-') + ' / ' + (info.total != null ? info.total : '-') + '）天' : '';
+      const streakTxt = (info.cont != null || info.total != null) ? '：连续/累计签到（' + (info.cont != null ? info.cont : '-') + ' / ' + (info.total != null ? info.total : '-') + '）' : '';
       sitesHtml += '<div style="border-top:1px solid ' + P.hr + ';padding:6px 0;">' +
         '<div><b>' + reg.name + '</b>' + (id === curId ? ' <span style="color:#2e9e4f;font-weight:bold;">（本站）</span>' : '') + streakTxt + ' <span style="color:' + sum.level[1] + ';font-weight:bold;">' + sum.level[0] + '</span>' +
         (isPaused ? ' <span style="color:' + P.faint + ';">（已暂停）</span>' : '') +
@@ -145,8 +146,6 @@
     });
     html += '<div style="margin-bottom:4px;">共 ' + siteIds.length + ' 个网站：全部成功 ' + nAll + '，部分有问题 ' + nPart + '，全部失败 ' + nFail + '，未执行 ' + nNone + '</div>';
     html += sitesHtml || '<div style="color:' + P.faint + ';">还没有任何站点脚本登记过。先打开各个网站，脚本运行后这里就会有内容。</div>';
-    const due = monthly && monthly.cyanbug && monthly.cyanbug.due;
-    html += '<div style="border-top:1px solid ' + P.hr + ';padding-top:6px;margin-top:4px;font-size:12px;">月度任务：大青虫求彩虹ID/求vip，下次到期 ' + (due ? String(due).slice(0, 10) : '未设置') + '</div>';
     html += '<div style="margin-top:8px;"><button data-act="export" style="' + BS + '">导出账本数据</button></div>' +
       '<div style="font-size:11px;color:' + P.faint + ';margin-top:4px;">整份数据备份请用脚本猫自带的备份功能（可走 WebDAV）。</div>';
     panelEl.innerHTML = html;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-NicePT
 // @namespace    nj.checkin
-// @version      1.0.3
+// @version      1.0.4
 // @description  NicePT 签到确认（网站自动签到）+ 趣味盒投票。本站任意页打开都会补做。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本
 // @author       momo
 // @match        *://www.nicept.net/*
@@ -15,7 +15,7 @@
 (function () {
   'use strict';
   if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框里重复运行
-  const SITE = { id: 'nicept', name: 'NicePT', tasks: [{ id: 'checkin', name: '签到（自动）' }, { id: 'funbox', name: '趣味盒投票' }] };
+  const SITE = { id: 'nicept', name: 'NicePT-老师', tasks: [{ id: 'checkin', name: '签到（自动）' }, { id: 'funbox', name: '趣味盒投票' }] };
   const HOME_URL = 'https://www.nicept.net/index.php';
   const ATT_URL = 'https://www.nicept.net/attendance.php';
   function tabId() { try { let t = sessionStorage.getItem('nj-tab-id'); if (!t) { t = Math.random().toString(36).slice(2); sessionStorage.setItem('nj-tab-id', t); } return t; } catch (e) { return 'x' + Math.random().toString(36).slice(2); } }
@@ -62,10 +62,11 @@
   }
   function closeRemote(ifr) { try { ifr.remove(); } catch (e) {} }
   function signedText(t) { return t.indexOf('签到已得') >= 0 || t.indexOf('签到成功') >= 0; }
+  function rewardDetail(t) { const m = (t || '').match(/签到已得\s*([\d,]+)/) || (t || '').match(/\+\s*([\d,]+)\s*魔力/); return m ? '获得 ' + m[1] + ' 魔力' : ''; }
 
   async function doCheckin() {
     // 本站打开签到页自动签到。先看当前页，再不行就后台打开签到页触发，回首页确认
-    if (signedText(pageText())) { streakFromText(pageText()); rec('checkin', 'success', '页面出现“签到已得/签到成功”，网站自动签到已完成'); return; }
+    if (signedText(pageText())) { streakFromText(pageText()); rec('checkin', 'success', rewardDetail(pageText())); return; }
     const att = await openRemote(ATT_URL);
     try { const ad = att.contentDocument; if (ad) streakFromText(docText(ad)); } catch (e) {}
     closeRemote(att);
@@ -73,7 +74,7 @@
     try {
       const d = home.contentDocument;
       const ok = d && await waitFor(() => signedText(docText(d)), 8000);
-      if (ok) { streakFromText(docText(d)); rec('checkin', 'success', '后台打开签到页后，首页出现“签到已得”，自动签到已完成'); return; }
+      if (ok) { streakFromText(docText(d)); rec('checkin', 'success', rewardDetail(docText(d))); return; }
     } finally { closeRemote(home); }
     rec('checkin', 'waiting', '还没看到签到字样，签到页打开后网站会自动签到');
   }
@@ -81,7 +82,7 @@
   async function funboxIn(doc) {
     const btn = await waitFor(() => findBtn(doc, ['有趣']), 12000);
     if (!btn) {
-      if (docText(doc).indexOf('认为它有趣') >= 0) { rec('funbox', 'done', '趣味盒没有投票按钮，说明已投过'); return; }
+      if (docText(doc).indexOf('认为它有趣') >= 0) { rec('funbox', 'novote', ''); return; }
       rec('funbox', 'failed', '没找到趣味盒投票按钮');
       return;
     }
@@ -89,7 +90,7 @@
     await pause();
     btn.click();
     const ok = await waitFor(() => !findBtn(doc, ['有趣']) || docText(doc).indexOf('谢谢！你的投票已提交') >= 0 || docText(doc).indexOf('你觉得呢') < 0, 12000);
-    if (ok) rec('funbox', 'success', '点“有趣”后按钮消失/出现谢谢提示');
+    if (ok) rec('funbox', 'success', '');
     else rec('funbox', 'failed', '点完后按钮还在，投票可能没成功');
   }
   async function doFunbox() {

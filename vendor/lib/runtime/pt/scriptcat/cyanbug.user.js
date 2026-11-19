@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-大青虫CyanBug
 // @namespace    nj.checkin
-// @version      1.0.3
+// @version      1.0.4
 // @description  大青虫：趣味盒投票 + 每日群聊两条（间隔70秒、等青虫娘回复）+ 月度群聊两条（到期才发）。本站任意页打开都会补做（后台打开首页完成）。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本
 // @author       momo
 // @match        *://cyanbug.net/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
   if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框里重复运行（小框内容由主脚本跨框查找处理）
-  const SITE = { id: 'cyanbug', name: '大青虫 CyanBug', tasks: [{ id: 'funbox', name: '趣味盒投票' }, { id: 'daily', name: '每日群聊（求上传+求魔力）' }, { id: 'monthly', name: '月度群聊（求彩虹ID+求vip）' }] };
+  const SITE = { id: 'cyanbug', name: 'CyanBug-大青虫', tasks: [{ id: 'funbox', name: '趣味盒投票' }, { id: 'chatup', name: '每日群聊（求上传）' }, { id: 'chatmagic', name: '每日群聊（求魔力）' }, { id: 'monthly', name: '月度群聊（求彩虹ID+求vip）' }] };
   const HOME_URL = 'https://cyanbug.net/index.php';
   function tabId() { try { let t = sessionStorage.getItem('nj-tab-id'); if (!t) { t = Math.random().toString(36).slice(2); sessionStorage.setItem('nj-tab-id', t); } return t; } catch (e) { return 'x' + Math.random().toString(36).slice(2); } }
   const TAB = tabId();
@@ -83,7 +83,7 @@
       return null;
     }, 10000);
     if (!found) {
-      if (allText(rootDoc).indexOf('认为它有趣') >= 0) { rec('funbox', 'done', '趣味盒没有投票按钮，说明已投过'); return; }
+      if (allText(rootDoc).indexOf('认为它有趣') >= 0) { rec('funbox', 'novote', ''); return; }
       rec('funbox', 'failed', '没找到趣味盒投票按钮');
       return;
     }
@@ -91,7 +91,7 @@
     await pause();
     found.btn.click();
     const ok = await waitFor(() => !findBtn(found.doc, ['有趣']) || docText(found.doc).indexOf('谢谢！你的投票已提交') >= 0 || allText(rootDoc).indexOf('谢谢！你的投票已提交') >= 0, 12000);
-    if (ok) rec('funbox', 'success', '点“有趣”后按钮消失/出现谢谢提示');
+    if (ok) rec('funbox', 'success', '');
     else rec('funbox', 'failed', '点完后按钮还在，投票可能没成功');
   }
 
@@ -170,12 +170,60 @@
     const allDup = r1.kind === 'dup' && r2.kind === 'dup';
     return { allDup: allDup, detail: '第一条：' + r1.line + '；第二条：' + r2.line };
   }
-  async function dailyIn(rootDoc) {
-    const res = await runPair(rootDoc, 'daily', '青虫娘，求上传', '青虫娘，求魔力');
-    if (!res) return;
-    if (res.allDup) rec('daily', 'done', '两条机器人都回复今日已获得，说明今天已领过。' + res.detail);
-    else rec('daily', 'success', res.detail);
+  /* ---------- 每日群聊：拆成两条独立任务，状态存 cyanbugChat（按日期记账） ----------
+     只认存储状态：未发送才发送；已发送只核实回复、绝不重复发送；已确认直接跳过。 */
+  function chatState() { const all = get('cyanbugChat', {}); return all[bjDate()] || { up: 'none', magic: 'none', upTs: 0 }; }
+  function setChat(patch) { const all = get('cyanbugChat', {}); const cur = all[bjDate()] || { up: 'none', magic: 'none', upTs: 0 }; for (const k in patch) cur[k] = patch[k]; all[bjDate()] = cur; set('cyanbugChat', all); }
+  function seedChatFromLedger() {
+    const st = chatState();
+    if (st.up !== 'none' || st.magic !== 'none') return;
+    const old = todayRec('daily'); // 旧版合并任务今天已成功/完成时，直接认定两条都确认，避免升级当天重复发送
+    if (old && (old.status === 'success' || old.status === 'done')) setChat({ up: 'confirmed', magic: 'confirmed' });
   }
+  async function waitReply(rootDoc, before, timeout) {
+    return waitFor(() => {
+      const now = replyState(rootDoc);
+      if (now.reward > before.reward) return 'reward';
+      if (now.dup > before.dup) return 'dup';
+      return null;
+    }, timeout, 3000);
+  }
+  async function chatOne(rootDoc, taskId, key, msg) {
+    seedChatFromLedger();
+    let st = chatState();
+    if (st[key] === 'confirmed') { rec(taskId, 'done', ''); return; }
+    if (key === 'magic' && st.up !== 'confirmed') { rec(taskId, 'waiting', '等第一条（求上传）确认后再发'); return; }
+    if (st[key] === 'sent' && replyState(rootDoc).dup > 0) { setChat({ up: 'confirmed', magic: 'confirmed' }); rec(taskId, 'done', ''); return; }
+    if (st[key] === 'sent') {
+      rec(taskId, 'running', '已发送过，只等回复确认，不重复发送');
+      const got = await waitReply(rootDoc, replyState(rootDoc), 90000);
+      if (got === 'reward') { const p = {}; p[key] = 'confirmed'; setChat(p); rec(taskId, 'success', ''); return; }
+      if (got === 'dup') { setChat({ up: 'confirmed', magic: 'confirmed' }); rec(taskId, 'done', ''); return; }
+      rec(taskId, 'waiting', '已发送，等青虫娘回复（不重复发送）');
+      return;
+    }
+    if (key === 'magic' && st.upTs && Date.now() - st.upTs < 70000) {
+      rec(taskId, 'waiting', '等够70秒间隔再发第二条');
+      await sleep(70000 - (Date.now() - st.upTs));
+      st = chatState();
+      if (st.magic === 'confirmed') { rec(taskId, 'done', ''); return; }
+    }
+    const input = chatInputIn(rootDoc);
+    const btn = chatSendBtn(input);
+    if (!input || !btn) { rec(taskId, 'failed', '没找到群聊输入框或发送按钮（需要校准）'); return; }
+    const before = replyState(rootDoc);
+    const patch = {}; patch[key] = 'sent'; patch[key + 'Ts'] = Date.now(); setChat(patch); // 先落状态再发送，刷新/重开也不会重复发送
+    rec(taskId, 'running', '发送：' + msg);
+    setValue(input, msg);
+    await pause();
+    btn.click();
+    const got = await waitReply(rootDoc, before, 300000);
+    if (got === 'reward') { const p = {}; p[key] = 'confirmed'; setChat(p); rec(taskId, 'success', ''); return; }
+    if (got === 'dup') { setChat({ up: 'confirmed', magic: 'confirmed' }); rec(taskId, 'done', ''); return; }
+    rec(taskId, 'waiting', '已发送，等了5分钟没等到回复，没有重发');
+  }
+  async function chatUpIn(rootDoc) { await chatOne(rootDoc, 'chatup', 'up', '青虫娘，求上传'); }
+  async function chatMagicIn(rootDoc) { await chatOne(rootDoc, 'chatmagic', 'magic', '青虫娘，求魔力'); }
   async function monthlyIn(rootDoc) {
     const monthly = get('monthly', {});
     if (!monthly.cyanbug) { monthly.cyanbug = { due: '2026-11-23T00:00:00+08:00' }; set('monthly', monthly); }
@@ -204,7 +252,8 @@
     } finally { closeRemote(ifr); }
   }
   async function doFunbox() { await withHome(funboxIn); }
-  async function doDaily() { await withHome(dailyIn); }
+  async function doChatUp() { await withHome(chatUpIn); }
+  async function doChatMagic() { await withHome(chatMagicIn); }
   async function doMonthly() {
     /* 未到期只记账、不必打开首页 */
     const monthly = get('monthly', {});
@@ -217,7 +266,7 @@
     await withHome(monthlyIn);
   }
 
-  const runners = { funbox: doFunbox, daily: doDaily, monthly: doMonthly };
+  const runners = { funbox: doFunbox, chatup: doChatUp, chatmagic: doChatMagic, monthly: doMonthly };
   async function run(task, force) {
     if (isPaused()) return;
     if (finished(task)) return; // 已成功/已完成的任务绝不重复执行（包括自动重试与手动重试触发时）
@@ -235,7 +284,8 @@
     register();
     if (isPaused()) return;
     await run('funbox', false);
-    await run('daily', false);
+    await run('chatup', false);
+    await run('chatmagic', false);
     await run('monthly', false);
     captureStreak();
   }

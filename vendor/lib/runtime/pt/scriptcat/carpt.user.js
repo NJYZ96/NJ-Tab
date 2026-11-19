@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-CarPT
 // @namespace    nj.checkin
-// @version      1.0.3
+// @version      1.0.4
 // @description  CarPT 天天快乐任务领取（24小时循环）：页面有任务进行状态就不领，没有就去任务页领取。签到是网站自动的，本脚本不管签到。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本
 // @author       momo
 // @match        *://carpt.net/*
@@ -15,7 +15,7 @@
 (function () {
   'use strict';
   if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框里重复运行
-  const SITE = { id: 'carpt', name: 'CarPT', tasks: [{ id: 'task', name: '天天快乐领取' }] };
+  const SITE = { id: 'carpt', name: 'CarPT-车站', tasks: [{ id: 'task', name: '天天快乐领取' }] };
   const TASK_URL = 'https://carpt.net/task.php';
   function tabId() { try { let t = sessionStorage.getItem('nj-tab-id'); if (!t) { t = Math.random().toString(36).slice(2); sessionStorage.setItem('nj-tab-id', t); } return t; } catch (e) { return 'x' + Math.random().toString(36).slice(2); } }
   const TAB = tabId();
@@ -84,7 +84,7 @@
   }
   async function claimIn(doc) {
     const info = activeInfo(doc);
-    if (info) { saveUntil(info.until); rec('task', 'done', '任务进行中，到期时间 ' + (info.untilText || '见页面')); return; }
+    if (info) { saveUntil(info.until); rec('task', 'done', '任务：进行中（天天快乐，到期时间 ' + (info.untilText || '见页面') + '）'); return; }
     const row = await waitFor(() => taskRow(doc), 12000);
     if (!row) { rec('task', 'failed', '任务页没找到“天天快乐任务”这一行（需要校准）'); return; }
     const rowText = row.textContent || '';
@@ -122,7 +122,7 @@
   }
   async function doTask() {
     const info = activeInfo(document);
-    if (info) { saveUntil(info.until); rec('task', 'done', '任务进行中，到期时间 ' + (info.untilText || '见页面')); return; }
+    if (info) { saveUntil(info.until); rec('task', 'done', '任务：进行中（天天快乐，到期时间 ' + (info.untilText || '见页面') + '）'); return; }
     if (location.pathname.indexOf('task.php') >= 0) { await claimIn(document); return; }
     const ifr = await openRemote(TASK_URL);
     try {

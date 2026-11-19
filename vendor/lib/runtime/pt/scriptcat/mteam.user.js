@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-M-Team
 // @namespace    nj.checkin
-// @version      1.0.3
+// @version      1.0.4
 // @description  M-Team 趣味盒点赞投票（两个数字按钮：第一个是点赞、第二个是点踩；成功标志：点赞数+1且两个按钮都变不可点），结果写入共享账本。失败自动重试（原地→刷新，一天最多3次）；不在首页时后台打开首页完成
 // @author       momo
 // @match        *://kp.m-team.cc/*
@@ -15,7 +15,7 @@
 (function () {
   'use strict';
   if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框里重复运行
-  const SITE = { id: 'mteam', name: 'M-Team', tasks: [{ id: 'funbox', name: '趣味盒点赞' }] };
+  const SITE = { id: 'mteam', name: 'M-Team-馒头', tasks: [{ id: 'funbox', name: '趣味盒投票' }] };
   const HOME_URL = 'https://kp.m-team.cc/index';
   function tabId() { try { let t = sessionStorage.getItem('nj-tab-id'); if (!t) { t = Math.random().toString(36).slice(2); sessionStorage.setItem('nj-tab-id', t); } return t; } catch (e) { return 'x' + Math.random().toString(36).slice(2); } }
   const TAB = tabId();
@@ -66,8 +66,8 @@
   async function voteIn(doc) {
     const pair = await waitFor(() => votePair(doc), 15000);
     if (!pair) { rec('funbox', 'failed', '没找到趣味盒投票按钮（需要校准）'); return; }
-    if (isDisabled(pair.like) && isDisabled(pair.dislike)) { rec('funbox', 'done', '两个投票按钮已是不可点，说明今天已投过'); return; }
-    if (isDisabled(pair.like)) { rec('funbox', 'done', '点赞按钮已是不可点，说明今天已投过'); return; }
+    if (isDisabled(pair.like) && isDisabled(pair.dislike)) { rec('funbox', 'novote', ''); return; }
+    if (isDisabled(pair.like)) { rec('funbox', 'novote', ''); return; }
     const before = parseInt((pair.like.textContent || '').trim(), 10);
     rec('funbox', 'running', '点击点赞按钮（当前点赞数 ' + before + '）');
     await pause();
@@ -81,7 +81,7 @@
       if (!isNaN(before) && now === before + 1) return { now: now };
       return false;
     }, 15000);
-    if (ok) rec('funbox', 'success', '点赞成功（点赞数 ' + before + '→' + ok.now + '，按钮已变不可点）');
+    if (ok) rec('funbox', 'success', '');
     else rec('funbox', 'failed', '点完后按钮没有变成不可点，投票可能没成功');
   }
   async function doFunbox() {

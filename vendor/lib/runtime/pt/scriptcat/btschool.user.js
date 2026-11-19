@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-BTSCHOOL
 // @namespace    nj.checkin
-// @version      1.0.3
+// @version      1.0.4
 // @description  BTSCHOOL 每日签到 + 趣味盒投票。本站任意页打开都会补做。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本（总面板可看）
 // @author       momo
 // @match        *://pt.btschool.club/*
@@ -15,7 +15,7 @@
 (function () {
   'use strict';
   if (window.top !== window.self) return; // 只在最外层页面运行，避免在站内小框里重复运行
-  const SITE = { id: 'btschool', name: 'BTSCHOOL', tasks: [{ id: 'checkin', name: '每日签到' }, { id: 'funbox', name: '趣味盒投票' }] };
+  const SITE = { id: 'btschool', name: 'BTSCHOOL-学校', tasks: [{ id: 'checkin', name: '每日签到' }, { id: 'funbox', name: '趣味盒投票' }] };
   const HOME_URL = 'https://pt.btschool.club/index.php';
   function tabId() { try { let t = sessionStorage.getItem('nj-tab-id'); if (!t) { t = Math.random().toString(36).slice(2); sessionStorage.setItem('nj-tab-id', t); } return t; } catch (e) { return 'x' + Math.random().toString(36).slice(2); } }
   const TAB = tabId();
@@ -63,14 +63,15 @@
   }
   function closeRemote(ifr) { try { ifr.remove(); } catch (e) {} }
 
+  function rewardDetail(t) { const m = (t || '').match(/获得\s*([\d,]+)\s*点?魔力/); return m ? '获得 ' + m[1] + ' 魔力' : ''; }
   function signBtn(doc) { return doc.querySelector('a[href*="addbonus"]') || findBtn(doc, ['每日签到']); }
   async function checkinIn(doc) {
-    if (!signBtn(doc)) { rec('checkin', 'done', '首页没有“每日签到”按钮，说明今天已签到'); return; }
+    if (!signBtn(doc)) { rec('checkin', 'done', rewardDetail(docText(doc))); return; }
     rec('checkin', 'running', '点击每日签到');
     await pause();
     signBtn(doc).click();
     const gone = await waitFor(() => !signBtn(doc), 12000);
-    if (gone) rec('checkin', 'success', '点击后“每日签到”按钮消失');
+    if (gone) rec('checkin', 'success', rewardDetail(docText(doc)));
     else rec('checkin', 'failed', '点完后按钮还在，签到可能没成功');
   }
   function funboxDocIn(rootDoc) {
@@ -88,7 +89,7 @@
       if (inner) btn = findBtn(inner, ['有趣']);
     }
     if (!btn) {
-      if (docText(doc).indexOf('认为它有趣') >= 0) { rec('funbox', 'done', '趣味盒没有投票按钮，说明已投过'); return; }
+      if (docText(doc).indexOf('认为它有趣') >= 0) { rec('funbox', 'novote', ''); return; }
       rec('funbox', 'failed', '没找到趣味盒投票按钮');
       return;
     }
@@ -96,7 +97,7 @@
     await pause();
     btn.click();
     const ok = await waitFor(() => !findBtn(doc, ['有趣']) || docText(doc).indexOf('谢谢！你的投票已提交') >= 0 || docText(doc).indexOf('你觉得呢') < 0, 12000);
-    if (ok) rec('funbox', 'success', '点“有趣”后按钮消失/出现谢谢提示');
+    if (ok) rec('funbox', 'success', '');
     else rec('funbox', 'failed', '点完后按钮还在，投票可能没成功');
   }
   async function withHome(fn) {
