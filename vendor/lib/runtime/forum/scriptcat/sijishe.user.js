@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-Sijishe司机社
 // @namespace    nj.checkin
-// @version      1.0.2
+// @version      1.0.3
 // @description  司机社（论坛类）每日签到。本站任意页打开都会补做。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本（总面板可看）
 // @author       momo
 // @match        *://xsijishe.net/*
@@ -74,6 +74,14 @@
     });
   }
   function signBtn(doc) {
+    /* 首选按代码特征找（2026-11-19 用户用开发者工具复制真实代码确认）：签到按钮是
+       <a id="JD_sign" href="plugin.php?id=k_misign:sign&operation=qiandao&formhash=…&format=empty">，
+       里面没有任何文字（“签到”二字是背景图），靠文字永远找不到，必须按 id / 链接特征找。 */
+    const byId = doc.getElementById ? doc.getElementById('JD_sign') : null;
+    if (byId) return byId;
+    const byHref = Array.from(doc.querySelectorAll('a[href*="operation=qiandao"]'));
+    if (byHref.length) return byHref[0];
+    // 兜底：老办法按文字在状态文字附近找
     // 先在状态文字附近找
     const all = Array.from(doc.querySelectorAll('div,td,span,p'));
     const holder = all.find(el => (el.textContent || '').indexOf('您今天还没有签到') >= 0 && (el.textContent || '').length < 3000);
@@ -98,7 +106,8 @@
     }
     return out.join(' / ');
   }
-  async function checkinIn(doc) {
+  async function checkinIn(doc, getDoc) {
+    getDoc = getDoc || (() => doc);
     const t0 = docText(doc);
     streakFromText(t0);
     if (!notSigned(t0)) { rec('checkin', 'done', rewardDetail(t0)); return; } // 没有“您今天还没有签到”＝今天已签到
@@ -107,8 +116,8 @@
     rec('checkin', 'running', '点击签到');
     await pause();
     btn.click();
-    const ok = await waitFor(() => { const t = docText(doc); return !notSigned(t) || t.indexOf('签到成功') >= 0; }, 15000);
-    if (ok) { const t1 = docText(doc); streakFromText(t1); rec('checkin', 'success', rewardDetail(t1)); }
+    const ok = await waitFor(() => { const t = docText(getDoc() || doc); return !notSigned(t) || t.indexOf('签到成功') >= 0; }, 15000);
+    if (ok) { const t1 = docText(getDoc() || doc); streakFromText(t1); rec('checkin', 'success', rewardDetail(t1)); }
     else rec('checkin', 'failed', '点完后页面仍显示“您今天还没有签到”');
   }
   async function doCheckin() {
@@ -116,7 +125,7 @@
     const ifr = await openRemote(SIGN_URL);
     try {
       const d = ifr.contentDocument;
-      if (d) await checkinIn(d); else rec('checkin', 'failed', '跨页打开签到页失败');
+      if (d) await checkinIn(d, () => ifr.contentDocument); else rec('checkin', 'failed', '跨页打开签到页失败');
     } finally { closeRemote(ifr); }
   }
 
