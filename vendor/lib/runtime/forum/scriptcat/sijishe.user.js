@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-Sijishe司机社
 // @namespace    nj.checkin
-// @version      1.0.4
+// @version      1.0.5
 // @description  司机社（论坛类）每日签到。本站任意页打开都会补做。失败自动重试（原地→刷新，一天最多3次）。结果写入共享账本（总面板可看）
 // @author       momo
 // @match        *://xsijishe.net/*
@@ -23,9 +23,46 @@
   function bjTime(d) { d = d || new Date(); const b = new Date(d.getTime() + (d.getTimezoneOffset() + 480) * 60000); const p = n => String(n).padStart(2, '0'); return p(b.getHours()) + ':' + p(b.getMinutes()) + ':' + p(b.getSeconds()); }
   function get(k, def) { try { const v = GM_getValue(k); return v === undefined ? def : v; } catch (e) { return def; } }
   function set(k, v) { try { GM_setValue(k, v); } catch (e) {} }
-  function rec(task, status, detail) { const L = get('ledger', {}); const day = bjDate(); if (!L[day]) L[day] = {}; if (!L[day][SITE.id]) L[day][SITE.id] = {}; const cur = L[day][SITE.id][task]; /* 写前复查：今天已是完成态（成功/已完成/无需投票）的记录，不许被未完成状态盖掉——防旧流程或重复运行把好记录冲成失败 */ if (cur && (cur.status === 'success' || cur.status === 'done' || cur.status === 'novote') && status !== 'success' && status !== 'done' && status !== 'novote') return; L[day][SITE.id][task] = { status: status, time: bjTime(), detail: detail || '' }; set('ledger', L); }
+  function rec(task, status, detail) {
+    const day = bjDate();
+    const mine = { status: status, time: bjTime(), detail: detail || '' };
+    const writeMine = () => {
+      const L = get('ledger', {});
+      if (!L[day]) L[day] = {};
+      if (!L[day][SITE.id]) L[day][SITE.id] = {};
+      const cur = L[day][SITE.id][task];
+      /* 写前复查：今天已是完成态（成功/已完成/无需投票）的记录，不许被未完成状态盖掉——防旧流程或重复运行把好记录冲成失败 */
+      if (cur && (cur.status === 'success' || cur.status === 'done' || cur.status === 'novote') && mine.status !== 'success' && mine.status !== 'done' && mine.status !== 'novote') return false;
+      L[day][SITE.id][task] = mine;
+      set('ledger', L);
+      return true;
+    };
+    if (!writeMine()) return;
+    /* 写后核对：批量打开时别的脚本可能拿旧账本整份覆盖、把刚写的记录冲掉。
+       隔一小会儿重读：记录不见了、或被更早时间的旧记录顶替了，就补写回来，最多 2 轮。 */
+    let rounds = 0;
+    const verify = () => {
+      const L = get('ledger', {});
+      const cur = L[day] && L[day][SITE.id] && L[day][SITE.id][task];
+      const done = cur && (cur.status === 'success' || cur.status === 'done' || cur.status === 'novote');
+      if (!cur || (!done && cur.time < mine.time)) { if (writeMine() && ++rounds < 2) setTimeout(verify, 600 + Math.random() * 800); }
+    };
+    setTimeout(verify, 500 + Math.random() * 700);
+  }
   function todayRec(task) { const L = get('ledger', {}); const d = L[bjDate()] || {}; const s = d[SITE.id] || {}; return s[task] || null; }
-  function register() { const r = get('registry', {}); r[SITE.id] = { name: SITE.name, tasks: SITE.tasks, version: (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '' }; set('registry', r); }
+  function register() {
+    const entry = { name: SITE.name, tasks: SITE.tasks, version: (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '' };
+    const merge = () => { const r = get('registry', {}); r[SITE.id] = entry; set('registry', r); };
+    merge();
+    /* 写后核对：批量打开时多个脚本会在同一瞬间写登记表、互相把对方的登记冲掉。
+       隔一小会儿重读，自己的登记不在了就合并补写（只加自己的、不动别人的），最多 3 轮。 */
+    let rounds = 0;
+    const verify = () => {
+      const cur = get('registry', {});
+      if (!cur[SITE.id]) { merge(); if (++rounds < 3) setTimeout(verify, 500 + Math.random() * 700); }
+    };
+    setTimeout(verify, 400 + Math.random() * 600);
+  }
   function isPaused() { return !!get('paused', {})[SITE.id]; }
   function claim() { const locks = get('locks', {}); const cur = locks[SITE.id]; const now = Date.now(); if (cur && now - cur.ts < 600000 && cur.owner !== TAB) return false; locks[SITE.id] = { ts: now, owner: TAB }; set('locks', locks); return true; }
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }

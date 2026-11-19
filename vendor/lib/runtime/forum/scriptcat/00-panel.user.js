@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         每日签到-论坛总面板
 // @namespace    nj.checkin
-// @version      1.0.2
+// @version      1.0.3
 // @description  汇总显示论坛类站点脚本今天的执行情况（只读账本，不执行站点动作）。面板可点按钮开关、点面板外自动关闭；主题为右上角图标按钮（自动/白天/暗黑，默认自动），面板按钮跟随主题配色；在哪个站打开面板，哪个站置顶显示
 // @author       momo
 // @grant        GM_setValue
@@ -89,6 +89,7 @@
 
   let panelEl = null;
   let panelOpen = false;
+  let panelTimer = null;
 
   function applyTheme() {
     if (!panelEl) return;
@@ -200,10 +201,13 @@
     panelOpen = true;
     applyTheme();
     render();
+    /* 面板开着时每 5 秒主动重读一次登记表与账本：批量打开时各站是陆续登记、陆续写入的，不能只看打开那一刻的数据 */
+    if (!panelTimer) panelTimer = setInterval(() => { if (panelOpen) render(); }, 5000);
   }
   function hidePanel() {
     if (panelEl) panelEl.style.display = 'none';
     panelOpen = false;
+    if (panelTimer) { clearInterval(panelTimer); panelTimer = null; }
   }
 
   const btn = document.createElement('div');
@@ -229,5 +233,6 @@
 
   try { GM_registerMenuCommand('打开签到面板', showPanel); } catch (e) {}
   try { GM_addValueChangeListener('ledger', () => { if (panelOpen) render(); }); } catch (e) {}
+  try { GM_addValueChangeListener('registry', () => { if (panelOpen) render(); }); } catch (e) {}
   try { GM_addValueChangeListener('panelTheme', () => { if (panelOpen) { applyTheme(); render(); } }); } catch (e) {}
 })();
