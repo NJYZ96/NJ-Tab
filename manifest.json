@@ -1,55 +1,54 @@
 {
-    "version": "4.3.0",
-    "name": "NJ-Tab",
-    "manifest_version": 3,
-    "description": "__MSG_pluginDesc__",
-    "background": {
-        "service_worker": "js/background.js"
+  "version": "4.4.1",
+  "name": "NJ-Tab",
+  "manifest_version": 3,
+  "description": "__MSG_pluginDesc__",
+  "background": {
+    "service_worker": "js/background.js"
+  },
+  "icons": {
+    "48": "images/48.png",
+    "96": "images/96.png",
+    "128": "images/128.png"
+  },
+  "permissions": [
+    "tabs",
+    "contextMenus",
+    "storage",
+    "unlimitedStorage",
+    "notifications",
+    "idle",
+    "alarms",
+    "commands"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_security_policy": {
+    "sandbox": "sandbox allow-scripts; script-src 'self' https://api.github.com https://gitee.com 'unsafe-eval'; object-src 'self'"
+  },
+  "action": {
+    "default_icon": "images/96.png",
+    "default_title": "NJ-Tab",
+    "default_popup": "popup.html"
+  },
+  "web_accessible_resources": [],
+  "homepage_url": "https://github.com/NJYZ96/NJ-Tab",
+  "default_locale": "zh_CN",
+  "commands": {
+    "toggle-feature-save-all": {
+      "suggested_key": {
+        "default": "Ctrl+Q",
+        "mac": "Command+Q"
+      },
+      "description": "__MSG_toggleFeatureSaveAllTabs__"
     },
-    "icons": {
-        "48": "images/48.png",
-        "96": "images/96.png",
-        "128": "images/128.png"
-    },
-    "permissions": [
-        "tabs",
-        "contextMenus",
-        "storage",
-        "unlimitedStorage",
-        "notifications",
-        "idle",
-        "alarms",
-        "commands"
-    ],
-    "host_permissions": [
-        "<all_urls>"
-    ],
-    "content_security_policy": {
-      "sandbox": "sandbox allow-scripts; script-src 'self' https://api.github.com https://gitee.com https://hm.baidu.com 'unsafe-eval' https://hmcdn.baidu.com; object-src 'self'"
-    },
-    "action": {
-        "default_icon": "images/96.png",
-        "default_title": "NJ-Tab",
-        "default_popup": "popup.html"
-    },
-    "web_accessible_resources": [
-    ],
-    "homepage_url": "https://github.com/NJYZ96/NJ-Tab",
-    "default_locale": "zh_CN",
-    "commands": {
-        "toggle-feature-save-all": {
-            "suggested_key": {
-                "default": "Ctrl+Q",
-                "mac": "Command+Q"
-            },
-            "description": "__MSG_toggleFeatureSaveAllTabs__"
-        },
-        "toggle-feature-save-current": {
-            "suggested_key": {
-                "default": "Alt+Q",
-                "mac": "Alt+Q"
-            },
-            "description": "__MSG_toggleFeatureSaveCurrentTabs__"
-        }
+    "toggle-feature-save-current": {
+      "suggested_key": {
+        "default": "Alt+Q",
+        "mac": "Alt+Q"
+      },
+      "description": "__MSG_toggleFeatureSaveCurrentTabs__"
     }
+  }
 }

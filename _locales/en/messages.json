@@ -102,10 +102,10 @@
 		"message": "export to local"
 	},
 	"importWarn": {
-		"message": "PS:The import contents is from OneTab extension, Format refer to the example above: Newline means grouping, | before is URL, and | behind is title, and | have spaces on both sides"
+		"message": "Format as in the example above: a blank line separates groups; each line is \"URL | Title\" (spaces around the |)."
 	},
 	"exportWarn": {
-		"message": "PS:The export contents save by yourself, Format description: Newline means grouping, | before is URL, and | behind is title, and | have spaces on both sides"
+		"message": "Copy and save the exported text yourself."
 	},
 	"packUp": {
 		"message": "pack up"
@@ -504,13 +504,13 @@
 		"message": "Export full backup"
 	},
 	"exportFileTip": {
-		"message": "The web page file can be opened directly to view and click the links; the full backup file contains everything and can be used to restore your data."
+		"message": "The web page file opens directly in a browser; the full backup contains everything and can restore your data."
 	},
 	"importBackupFile": {
 		"message": "Import from backup file"
 	},
 	"importBackupTip": {
-		"message": "Choose a .json file saved earlier with Export full backup. Importing appends and merges: it will not overwrite your existing tabs, and collection times and other info in the backup are kept as they are."
+		"message": "Choose a .json file saved earlier with \"Export full backup\". Importing appends and merges: existing tabs are not overwritten, and collection times are kept as they are."
 	},
 	"backupInvalid": {
 		"message": "This backup file is not in the right format, and nothing was imported. Please make sure it is a file created by this extension's Export full backup."
@@ -717,13 +717,37 @@
 		"message": "Restore failed, and your current local data was not changed. Details:"
 	},
 	"searchPlaceholder": {
-		"message": "Search tab titles, URLs or group names"
+		"message": "Search: type and press Enter (title, URL or group name)"
 	},
 	"searchResults": {
 		"message": "Found: "
 	},
 	"searchNoResults": {
 		"message": "No matching tabs found"
+	},
+	"jumpToGroup": {
+		"message": "Jump to its group"
+	},
+	"deleteThisTab": {
+		"message": "Delete this tab"
+	},
+	"unlockThisTab": {
+		"message": "Click the lock to unlock this tab before deleting"
+	},
+	"searchInTrash": {
+		"message": " (in Trash)"
+	},
+	"importWarnDefault": {
+		"message": "Format as in the example above: the first line is \"Group name | Locked | Pinned\", then one \"URL | Title | Added time\" per line."
+	},
+	"importDedupHint": {
+		"message": "Dedup: a tab whose URL and title are both the same as an existing tab is skipped (across groups too); the main list and the trash are compared separately."
+	},
+	"dedupSkipped": {
+		"message": " duplicate tab(s) skipped (same URL and title as an existing tab)"
+	},
+	"logAction_importText": {
+		"message": "Text import"
 	},
 	"groupNote": {
 		"message": "Note"
@@ -759,7 +783,10 @@
 		"message": "Saved. Leave blank to keep unchanged"
 	},
 	"secretSecurityNote": {
-		"message": "Passwords and tokens are stored encrypted on this device only, never in plaintext, and never included in any backup, export or Gist. Note: browser extensions have no system-level vault, so local encryption mainly prevents plaintext exposure and cannot guarantee absolute security."
+		"message": "Passwords and tokens are stored encrypted on this device only, never in plaintext, and never included in any backup, export or Gist."
+	},
+	"secretSecurityWarn": {
+		"message": "Note: browser extensions have no system-level vault, so local encryption mainly prevents plaintext exposure and cannot guarantee absolute security."
 	},
 	"webdavAutoBackup": {
 		"message": "WebDAV auto backup"
@@ -808,5 +835,14 @@
 	},
 	"logCollapse": {
 		"message": "Show less"
+	},
+	"versionReleasesTitle": {
+		"message": "View all versions (Releases)"
+	},
+	"gistOldReadOnly": {
+		"message": "The saved ID belongs to a legacy (3.1) Gist, which is read-only; push will use the new NJ-Tab Gist"
+	},
+	"discardedThresholdText": {
+		"message": "Sleep threshold: when a group has more tabs than this, the first ones open directly and the rest are slept"
 	}
 }

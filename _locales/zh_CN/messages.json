@@ -102,10 +102,10 @@
 		"message": "导出"
 	},
 	"importWarn": {
-		"message": "PS：导入的是从OneTab导出的内容，参照以上的例子，格式说明：换行表示分组，|前面是网址，|后面是标题，|两边都有空格"
+		"message": "格式照上方例子：空行表示分组，每行是「网址 | 标题」（| 两边有空格）。"
 	},
 	"exportWarn": {
-		"message": "PS：导出后自行复制保存，格式说明：换行表示分组，|前面是网址，|后面是标题，|两边都有空格"
+		"message": "导出后请自行复制保存好。"
 	},
 	"packUp": {
 		"message": "收起"
@@ -504,13 +504,13 @@
 		"message": "导出完整备份"
 	},
 	"exportFileTip": {
-		"message": "网页文件可以直接双击打开查看、点开里面的链接；完整备份文件包含全部信息，可以用来恢复数据。"
+		"message": "网页文件可双击打开查看、点链接；完整备份包含全部数据，可用于恢复。"
 	},
 	"importBackupFile": {
 		"message": "从备份文件导入"
 	},
 	"importBackupTip": {
-		"message": "选择之前用“导出完整备份”保存的 .json 文件。导入是追加合并：不会覆盖现有标签，备份里的收集时间等信息都会原样保留。"
+		"message": "选之前用「导出完整备份」存的 .json 文件；导入是追加合并，不覆盖现有标签，收集时间等信息原样保留。"
 	},
 	"backupInvalid": {
 		"message": "这个备份文件格式不正确，没有导入任何数据。请确认选的是本插件“导出完整备份”生成的文件。"
@@ -717,13 +717,37 @@
 		"message": "恢复失败，现在的本地数据没有被改动。详情："
 	},
 	"searchPlaceholder": {
-		"message": "搜索：输入标签标题、网址或组名"
+		"message": "搜索：输入后按回车（标题、网址或组名）"
 	},
 	"searchResults": {
 		"message": "找到："
 	},
 	"searchNoResults": {
 		"message": "没有找到匹配的标签"
+	},
+	"jumpToGroup": {
+		"message": "跳转到所在组"
+	},
+	"deleteThisTab": {
+		"message": "删除这条标签"
+	},
+	"unlockThisTab": {
+		"message": "先点小锁解锁这一条，才能删除"
+	},
+	"searchInTrash": {
+		"message": "（回收站内）"
+	},
+	"importWarnDefault": {
+		"message": "格式照上方例子：第一行是「组名 | 锁定 | 置顶」，下面每行是「网址 | 标题 | 添加时间」。"
+	},
+	"importDedupHint": {
+		"message": "去重：网址和标题都与已有标签相同的会跳过、不重复导入（跨组也算）；主列表与回收站分别比对。"
+	},
+	"dedupSkipped": {
+		"message": " 条标签因与已有标签重复（网址、标题都相同）被跳过"
+	},
+	"logAction_importText": {
+		"message": "文本导入"
 	},
 	"groupNote": {
 		"message": "备注"
@@ -759,7 +783,10 @@
 		"message": "已保存，留空表示不修改"
 	},
 	"secretSecurityNote": {
-		"message": "密码与令牌只在本机加密保存，不会明文存放，也不会进入任何备份、导出或 Gist。提醒：浏览器插件没有系统级保险箱，本机加密主要防止明文被直接看到或抄走，不能保证绝对安全。"
+		"message": "密码与令牌只在本机加密保存，不会明文存放，也不会进入任何备份、导出或 Gist。"
+	},
+	"secretSecurityWarn": {
+		"message": "提醒：浏览器插件没有系统级保险箱，本机加密主要防止明文被直接看到或抄走，不能保证绝对安全。"
 	},
 	"webdavAutoBackup": {
 		"message": "WebDAV 自动备份"
@@ -808,5 +835,14 @@
 	},
 	"logCollapse": {
 		"message": "收起"
+	},
+	"versionReleasesTitle": {
+		"message": "查看全部版本（下载页）"
+	},
+	"gistOldReadOnly": {
+		"message": "本地存的编号是旧版（3.1）的 Gist，只读不写；推送将使用新版自己的 Gist"
+	},
+	"discardedThresholdText": {
+		"message": "休眠阈值：组内标签超过下面这个数时，前面的直接打开、后面的休眠"
 	}
 }

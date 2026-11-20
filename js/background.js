@@ -198,19 +198,19 @@ function startPushToGithubGist() {
     handleGithubGistLog.push(`${chrome.i18n.getMessage("start")}${moment().format('YYYY-MM-DD HH:mm:ss')}`);
     handleGithubGistLog.push(`${chrome.i18n.getMessage("autoPushToGithubGist")}`)
     chrome.storage.local.get(null, function (storage) {
-        console.log(storage.handleGistStatus);
-        if (storage.handleGistStatus) {
+        console.log(storage.handleGithubGistStatus);
+        if (storage.handleGithubGistStatus) {
             console.log("handleGistStatus有值");
-            if (storage.handleGistStatus.type === "IDLE") {
+            if (storage.handleGithubGistStatus.type === "IDLE") {
                 pushToGithubGist();
             } else {
                 let time = moment().format('YYYY-MM-DD HH:mm:ss');
-                let expireTime = storage.handleGistStatus.expireTime;
+                let expireTime = storage.handleGithubGistStatus.expireTime;
                 console.log(expireTime)
                 if (time > expireTime) {
                     pushToGithubGist();
                 } else {
-                    handleGithubGistLog.push(storage.handleGistStatus.type)
+                    handleGithubGistLog.push(storage.handleGithubGistStatus.type)
                     handleGithubGistLog.push(`${chrome.i18n.getMessage("endPushToGithubGistTask")}`)
                     handleGithubGistLog.push(`${chrome.i18n.getMessage("end")}${moment().format('YYYY-MM-DD HH:mm:ss')}`);
                     setHandleGistLog(`${chrome.i18n.getMessage("autoPushGithub")}`, handleGithubGistLog);
@@ -230,19 +230,19 @@ function startPushToGiteeGist() {
     handleGiteeGistLog.push(`${chrome.i18n.getMessage("start")}${moment().format('YYYY-MM-DD HH:mm:ss')}`);
     handleGiteeGistLog.push(`${chrome.i18n.getMessage("autoPushToGiteeGist")}`)
     chrome.storage.local.get(null, function (storage) {
-        console.log(storage.handleGistStatus);
-        if (storage.handleGistStatus) {
+        console.log(storage.handleGiteeGistStatus);
+        if (storage.handleGiteeGistStatus) {
             console.log("handleGistStatus有值");
-            if (storage.handleGistStatus.type === "IDLE") {
+            if (storage.handleGiteeGistStatus.type === "IDLE") {
                 pushToGiteeGist();
             } else {
                 let time = moment().format('YYYY-MM-DD HH:mm:ss');
-                let expireTime = storage.handleGistStatus.expireTime;
+                let expireTime = storage.handleGiteeGistStatus.expireTime;
                 console.log(expireTime)
                 if (time > expireTime) {
                     pushToGiteeGist();
                 } else {
-                    handleGiteeGistLog.push(storage.handleGistStatus.type)
+                    handleGiteeGistLog.push(storage.handleGiteeGistStatus.type)
                     handleGiteeGistLog.push(`${chrome.i18n.getMessage("endPushToGiteeGistTask")}`)
                     handleGiteeGistLog.push(`${chrome.i18n.getMessage("end")}${moment().format('YYYY-MM-DD HH:mm:ss')}`);
                     setHandleGistLog(`${chrome.i18n.getMessage("autoPushGitee")}`, handleGiteeGistLog);
@@ -258,7 +258,7 @@ function startPushToGiteeGist() {
 // 推送到github的gist
 function pushToGithubGist() {
     console.log("推送github")
-    setHandleGistStatus(`${chrome.i18n.getMessage("pushToGithubGistIng")}`);
+    setHandleGistStatus(`${chrome.i18n.getMessage("pushToGithubGistIng")}`, "github");
     usedSeconds = 0;
     pushToGithubGistStatus = `${chrome.i18n.getMessage("startPushToGithubGistTask")}`;
     handleGithubGistLog.push(`${chrome.i18n.getMessage("startPushToGithubGistTask")}`)
@@ -271,7 +271,7 @@ function pushToGithubGist() {
                 handleGithubGistLog.push(`${usedSeconds}${chrome.i18n.getMessage("secondWait")}`)
                 handleGithubGistLog.push(`${chrome.i18n.getMessage("endPushToGithubGistTask")}`)
                 handleGithubGistLog.push(`${chrome.i18n.getMessage("end")}${moment().format('YYYY-MM-DD HH:mm:ss')}`);
-                setHandleGistStatus("IDLE");
+                setHandleGistStatus("IDLE", "github");
                 setHandleGistLog(`${chrome.i18n.getMessage("autoPushGithub")}`, handleGithubGistLog);
             }
         }, 1000);
@@ -283,7 +283,7 @@ function pushToGithubGist() {
 // 推送到gitee的gist
 function pushToGiteeGist() {
     console.log("推送gitee")
-    setHandleGistStatus(`${chrome.i18n.getMessage("pushToGiteeGistIng")}`);
+    setHandleGistStatus(`${chrome.i18n.getMessage("pushToGiteeGistIng")}`, "gitee");
     usedSeconds = 0;
     pushToGiteeGistStatus = `${chrome.i18n.getMessage("startPushToGiteeGistTask")}`;
     handleGiteeGistLog.push(`${chrome.i18n.getMessage("startPushToGiteeGistTask")}`)
@@ -296,7 +296,7 @@ function pushToGiteeGist() {
                 handleGiteeGistLog.push(`${usedSeconds}${chrome.i18n.getMessage("secondWait")}`)
                 handleGiteeGistLog.push(`${chrome.i18n.getMessage("endPushToGiteeGistTask")}`)
                 handleGiteeGistLog.push(`${chrome.i18n.getMessage("end")}${moment().format('YYYY-MM-DD HH:mm:ss')}`);
-                setHandleGistStatus("IDLE");
+                setHandleGistStatus("IDLE", "gitee");
                 setHandleGistLog(`${chrome.i18n.getMessage("autoPushGitee")}`, handleGiteeGistLog);
             }
         }, 1000);
@@ -359,10 +359,20 @@ function njDecryptSecret(v) {
     if (v === undefined || v === null || v === "") { return Promise.resolve(""); }
     if (typeof v === "string") { return Promise.resolve(v); }
     if (!njIsEncryptedSecret(v)) { return Promise.resolve(""); }
-    return njGetKey().then(function (key) {
+    function njTryDecrypt(key) {
         return crypto.subtle.decrypt({name: "AES-GCM", iv: njB64decode(v.iv)}, key, njB64decode(v.ct)).then(function (buf) {
             return new TextDecoder().decode(buf);
-        }).catch(function () { return ""; });
+        });
+    }
+    return njGetKey().then(function (key) {
+        return njTryDecrypt(key).catch(function () {
+            // 4.4 附带修复：缓存的钥匙可能与密文脱钩（页面与后台曾抢着生成钥匙、存储里的已被换掉）——
+            // 废掉缓存、按存储里现存的钥匙重读一次再试；还失败才当作没有（与旧行为一致返回空串）
+            njKeyPromise = null;
+            return njGetKey().then(function (freshKey) {
+                return njTryDecrypt(freshKey).catch(function () { return ""; });
+            });
+        });
     });
 }
 
@@ -418,6 +428,13 @@ function isStoredGiteeTokenLocal(action) {
 }
 
 // 判断是否已经保存了github的gistId
+// 判断一个 Gist 是不是新版自己的（描述 NJ-Tab 或含新版文件）；旧版（描述 myCloudSkyMonster / 只有 brower_Tabs.json）返回 false
+function njGistIsNew(data) {
+    if (!data) return false;
+    if (data.description === "NJ-Tab") return true;
+    return !!(data.files && data.files["NJ-Tab_Tabs.json"]);
+}
+
 function isStoredGithubGistIdLocal(action) {
     console.log("是否已经保存了github的gistId")
     handleGithubGistLog.push(`${chrome.i18n.getMessage("startCheckGistIdSaved")}`)
@@ -427,13 +444,28 @@ function isStoredGithubGistIdLocal(action) {
             handleGithubGistLog.push(`${chrome.i18n.getMessage("gistIdSaved")}`)
             githubGistId = storage.githubGistId;
             if (action === "push_github") {
-                getShardings(function (callback) {
-                    if (!callback || typeof callback == 'undefined') {
-                        updateGithubGist([]);
-                    } else {
-                        njWithBackupSettings(callback, function (content) { njGistAutoMaybePush("github", content, updateGithubGist); });
-                    }
-                })
+                // 4.4 需求一：编号可能是 3.1 旧 Gist 的——先读回核对标识，是旧版的只读跳过，绝不更新
+                let myHeaders = new Headers();
+                myHeaders.append("Authorization", "token " + githubGistToken)
+                myHeaders.append("accept", "application/vnd.github+json")
+                fetch(gitHubApiUrl + "/gists/" + githubGistId, {method: 'GET', headers: myHeaders})
+                    .then(response => response.ok ? response.json() : null)
+                    .catch(() => null)
+                    .then(gistData => {
+                        if (!njGistIsNew(gistData)) {
+                            handleGithubGistLog.push(`${chrome.i18n.getMessage("gistOldReadOnly")}`)
+                            njLogEvent("gistAutoBackup", false, "GitHub 本地编号是旧版 Gist，只读跳过");
+                            pushToGithubGistStatus = undefined;
+                            return;
+                        }
+                        getShardings(function (callback) {
+                            if (!callback || typeof callback == 'undefined') {
+                                updateGithubGist([]);
+                            } else {
+                                njWithBackupSettings(callback, function (content) { njGistAutoMaybePush("github", content, updateGithubGist); });
+                            }
+                        })
+                    });
             }
         } else {
             console.log("没有保存了github的gistId")
@@ -453,13 +485,27 @@ function isStoredGiteeGistIdLocal(action) {
             handleGiteeGistLog.push(`${chrome.i18n.getMessage("gistIdSaved")}`)
             giteeGistId = storage.giteeGistId;
             if (action === "push_gitee") {
-                getShardings(function (callback) {
-                    if (!callback || typeof callback == 'undefined') {
-                        updateGiteeGist([]);
-                    } else {
-                        njWithBackupSettings(callback, function (content) { njGistAutoMaybePush("gitee", content, updateGiteeGist); });
-                    }
-                })
+                // 4.4 需求一：同 GitHub——先核对标识，是旧版 Gist 的只读跳过
+                let myHeaders = new Headers();
+                myHeaders.append("Authorization", "token " + giteeGistToken)
+                fetch(giteeApiUrl + "/gists/" + giteeGistId, {method: 'GET', headers: myHeaders})
+                    .then(response => response.ok ? response.json() : null)
+                    .catch(() => null)
+                    .then(gistData => {
+                        if (!njGistIsNew(gistData)) {
+                            handleGiteeGistLog.push(`${chrome.i18n.getMessage("gistOldReadOnly")}`)
+                            njLogEvent("gistAutoBackup", false, "Gitee 本地编号是旧版 Gist，只读跳过");
+                            pushToGiteeGistStatus = undefined;
+                            return;
+                        }
+                        getShardings(function (callback) {
+                            if (!callback || typeof callback == 'undefined') {
+                                updateGiteeGist([]);
+                            } else {
+                                njWithBackupSettings(callback, function (content) { njGistAutoMaybePush("gitee", content, updateGiteeGist); });
+                            }
+                        })
+                    });
             }
         } else {
             console.log("没有保存了gitee的gistId")
@@ -470,7 +516,7 @@ function isStoredGiteeGistIdLocal(action) {
 }
 
 // 更新github的gist
-// 一次性迁移：先读回这个 Gist 确认旧文件在不在；同一次更新里写新文件、改新描述、删旧文件（先读到旧数据才改名，顺序不能反）
+// 4.4 需求一：只更新新版自己的 Gist（调用前已核对标识）；不再做改名、删旧文件的迁移动作，旧版 Gist 永不写入
 function updateGithubGist(content) {
     console.log("更新github的gist")
     handleGithubGistLog.push(`${chrome.i18n.getMessage("directUpdate")}`)
@@ -479,16 +525,7 @@ function updateGithubGist(content) {
     myHeaders.append("Authorization", "token " + githubGistToken)
     myHeaders.append("accept", "application/vnd.github+json")
     myHeaders.append("Content-Type", "application/json");
-    fetch(gitHubApiUrl + "/gists/" + githubGistId, {method: 'GET', headers: myHeaders})
-        .then(response => response.ok ? response.json() : null)
-        .catch(() => null)
-        .then(gistData => {
-            let files = {"NJ-Tab_Tabs.json": {"content": _content}};
-            if (gistData && gistData.files && gistData.files['brower_Tabs.json']) {
-                files['brower_Tabs.json'] = null;
-            }
-            patchGithubGist(files, myHeaders);
-        });
+    patchGithubGist({"NJ-Tab_Tabs.json": {"content": _content}}, myHeaders);
 }
 
 function patchGithubGist(files, myHeaders) {
@@ -618,10 +655,14 @@ function setHandleGistLog(type, handleGistLog) {
 }
 
 // 操作gist的全局状态，1分钟自动解锁，防止死锁
-function setHandleGistStatus(status) {
+// 4.4 附带修复：忙碌标记按平台分开存（handleGithubGistStatus / handleGiteeGistStatus），
+// 一个平台在忙不再挡住另一个平台的自动备份（旧的共用 handleGistStatus 不再写，只在打包时继续剔除）
+function setHandleGistStatus(status, platform) {
     let expireTime = moment().add(1, 'minutes').format('YYYY-MM-DD HH:mm:ss');
     let gistStatusMap = {type: status, expireTime: expireTime};
-    chrome.storage.local.set({handleGistStatus: gistStatusMap});
+    let obj = {};
+    obj[platform === "gitee" ? "handleGiteeGistStatus" : "handleGithubGistStatus"] = gistStatusMap;
+    chrome.storage.local.set(obj);
 }
 
 // 持续监听发送给background的消息
@@ -919,6 +960,12 @@ function getShardings(cb) {
         delete items.del_tabGroups_num
         delete items.gistLog
         delete items.handleGistStatus
+        delete items.handleGithubGistStatus
+        delete items.handleGiteeGistStatus
+        // 4.4 安全补漏：加密钥匙、操作日志、WebDAV 密码（密文）绝不进 Gist——钥匙与密文同传等于没加密
+        delete items.njSecretKeyJwk
+        delete items.njLogs
+        delete items.webdavPass
         delete items.giteeGistId
         delete items.giteeGistToken
         delete items.githubGistId
@@ -935,7 +982,7 @@ function getShardings(cb) {
 
 // ===== WebDAV 多版本自动备份（阶段4）=====
 // 4.2 需求三：备份包含配置（白名单与 workbench.js 保持一致；WebDAV 连接信息与凭据永不进备份）
-const NJ_BACKUP_SETTING_KEYS = ["themeMode", "options", "dragType", "autoSync", "delRetentionDays", "restoreDiscarded", "webdavAutoBackup", "webdavIntervalHours", "webdavKeepDays", "webdavKeepCount", "gistAutoEnabled", "gistAutoIntervalMinutes", "logAutoCleanEnabled", "logKeepDays", "logKeepCount"];
+const NJ_BACKUP_SETTING_KEYS = ["themeMode", "options", "dragType", "autoSync", "delRetentionDays", "restoreDiscarded", "discardedThreshold", "webdavAutoBackup", "webdavIntervalHours", "webdavKeepDays", "webdavKeepCount", "gistAutoEnabled", "gistAutoIntervalMinutes", "logAutoCleanEnabled", "logKeepDays", "logKeepCount"];
 
 function njPickBackupSettings(source) {
     let out = {};
