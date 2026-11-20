@@ -122,7 +122,9 @@
     // （见 currentGroupIndex/currentTabIndex 以及各处理函数里的 ci/cii）。
     // containerId：组列表容器 id（普通列表 tabGroups / 回收站 tabGroupsBak）
     // prefix：组内元素 id 前缀（普通列表 "" / 回收站 "del_"），ul 的 id 形如 prefix + "tabs_" + 序号
-    function syncDragDomOrder(containerId, prefix) {
+    // pageOffset：4.5 分页后页内序号要加上页偏移才是全列表序号（不传按 0）
+    function syncDragDomOrder(containerId, prefix, pageOffset) {
+        let njOff = pageOffset || 0;
         let container = document.getElementById(containerId);
         if (!container) {
             return;
@@ -130,27 +132,28 @@
         let groups = container.querySelectorAll(":scope > div.tabs");
         for (let k = 0; k < groups.length; k += 1) {
             let g = groups[k];
-            g.id = k;
+            let gk = k + njOff;
+            g.id = gk;
             let ul = g.querySelector("ul");
             if (ul) {
-                ul.id = prefix + "tabs_" + k;
+                ul.id = prefix + "tabs_" + gk;
             }
             let nameSpan = g.querySelector(".group-name");
             if (nameSpan) {
-                nameSpan.id = prefix + "groupTitle" + k;
+                nameSpan.id = prefix + "groupTitle" + gk;
             }
             let nameInput = g.querySelector(".group-title-input");
             if (nameInput) {
-                nameInput.id = prefix + "groupTitleInput" + k;
+                nameInput.id = prefix + "groupTitleInput" + gk;
             }
             // 备注的展示/编辑元素 id 同样写死了序号，一并重编号（回收站没有备注元素，查不到就跳过）
             let noteSpan = g.querySelector(".group-note");
             if (noteSpan) {
-                noteSpan.id = prefix + "groupNote" + k;
+                noteSpan.id = prefix + "groupNote" + gk;
             }
             let noteInput = g.querySelector(".group-note-input");
             if (noteInput) {
-                noteInput.id = prefix + "groupNoteInput" + k;
+                noteInput.id = prefix + "groupNoteInput" + gk;
             }
             let amount = g.querySelector(".group-amount");
             if (amount && ul) {
@@ -167,6 +170,12 @@
         }
         if (!node || !node.parentNode) {
             return fallback;
+        }
+        // 4.5 分页修正：组容器的 id 就是全列表序号（渲染时写入、拖拽重编号时按全序号维护），优先读 id。
+        // 旧逻辑按同级位置数序号——分页后那只是页内序号（第 2 页起差整整一页），会点错组、改错数据。
+        let byId = parseInt(node.id, 10);
+        if (!isNaN(byId)) {
+            return byId;
         }
         let groups = node.parentNode.querySelectorAll(":scope > div.tabs");
         for (let k = 0; k < groups.length; k += 1) {
@@ -410,6 +419,38 @@
         return {kept: kept, dupCount: dupCount};
     }
 
+    // ===== 4.5 需求八：备份导入按组时间排序 =====
+    // 排序键：组自带的 date（建组时刻）；组时间缺失/读不出时，兜底用组内标签最晚的 addTime；再没有记 0（排最后）。
+    // 现有组相对顺序一律不动，导入组逐个按时间插进现有组之间（新在前，与列表平时的顺序一致）。
+    function njParseTimeStr(v) {
+        if (!v) { return 0; }
+        let t = Date.parse(String(v).replace(" ", "T"));
+        return isNaN(t) ? 0 : t;
+    }
+    function njGroupTimeKey(g) {
+        let t = njParseTimeStr(g && g.date);
+        if (t) { return t; }
+        let m = 0;
+        ((g && g.tabs) || []).forEach(function (tb) {
+            let at = njParseTimeStr(tb && tb.addTime);
+            if (at > m) { m = at; }
+        });
+        return m;
+    }
+    function njMergeGroupsByTime(existing, imported) {
+        let result = (Array.isArray(existing) ? existing : []).slice();
+        let sorted = (Array.isArray(imported) ? imported : []).slice().sort(function (a, b) { return njGroupTimeKey(b) - njGroupTimeKey(a); });
+        sorted.forEach(function (g) {
+            let k = njGroupTimeKey(g);
+            let idx = -1;
+            for (let i = 0; i < result.length; i++) {
+                if (njGroupTimeKey(result[i]) <= k) { idx = i; break; }
+            }
+            if (idx === -1) { result.push(g); } else { result.splice(idx, 0, g); }
+        });
+        return result;
+    }
+
     // ===== 4.2 需求四：统一操作日志 =====
     // 存 chrome.storage.local 的 njLogs 数组：{t: 时间戳, action: 动作, ok: 成功与否, detail: 简短说明}
     // 绝不记密码/令牌原文。自动清理：logAutoCleanEnabled（默认开）、logKeepDays（默认 30 天）、logKeepCount（默认 500 条），与 background.js 同一套规则
@@ -482,7 +523,8 @@
                 if (!e || typeof e.t !== "number") { return; }
                 bySection[njLogSectionOf(e.action)].push({
                     t: e.t, label: njLogActionText(e.action), ok: !!e.ok,
-                    detail: e.detail || "", steps: Array.isArray(e.steps) ? e.steps : null
+                    detail: e.detail || "", steps: Array.isArray(e.steps) ? e.steps : null,
+                    src: "op", action: e.action
                 });
             });
             let processLogs = Array.isArray(st.gistLog) ? st.gistLog : [];
@@ -505,9 +547,44 @@
                     label: labelKey ? chrome.i18n.getMessage(labelKey) : (g.handleGistType || ""),
                     ok: gOk,
                     detail: "",
-                    steps: gSteps
+                    steps: gSteps,
+                    src: "proc", ptype: g.handleGistType || ""
                 });
             });
+            // 4.5 需求十：Gist 区去重——同一次推送/拉取往往既有一条简条（njLogs）又有一条带步骤的过程日志（gistLog），
+            // 页面上只留带详情的过程日志那条。判定：平台相同、种类相同（手动推送/手动拉取/自动备份）、时间相差 3 分钟内、过程日志带步骤。
+            (function () {
+                function platformOf(txt) {
+                    if (/github/i.test(txt || "")) { return "github"; }
+                    if (/gitee/i.test(txt || "")) { return "gitee"; }
+                    return "";
+                }
+                function opKind(action) {
+                    if (action === "gistPush" || action === "gistRateLimited") { return "push"; }
+                    if (action === "gistPull") { return "pull"; }
+                    if (action === "gistAutoBackup" || action === "gistAutoBackupRateLimited" || action === "gistAutoBackupSkipped") { return "auto"; }
+                    return "";
+                }
+                function procKind(ptype) {
+                    if (/^push_/.test(ptype || "")) { return "push"; }
+                    if (/^pull_/.test(ptype || "")) { return "pull"; }
+                    if (ptype) { return "auto"; }
+                    return "";
+                }
+                let procs = bySection.gist.filter(function (e) { return e.src === "proc" && e.steps && e.steps.length > 0; });
+                if (procs.length > 0) {
+                    bySection.gist = bySection.gist.filter(function (e) {
+                        if (e.src !== "op") { return true; }
+                        let kind = opKind(e.action);
+                        let plat = platformOf(e.detail);
+                        if (!kind || !plat) { return true; }
+                        let dup = procs.some(function (p) {
+                            return procKind(p.ptype) === kind && platformOf(p.ptype) === plat && Math.abs(p.t - e.t) <= 180000;
+                        });
+                        return !dup;
+                    });
+                }
+            })();
             // 顶栏状态改成日志口径（4.3 需求十三）：文字与悬停都说日志总条数
             let totalCount = opLogs.length + processLogs.length;
             let totalsEl = document.getElementById("totals");
@@ -723,12 +800,15 @@
 
     // 批量恢复时打开一个标签：
     // useDiscarded 为 false 时与原行为完全一致（chrome.tabs.create({url})）；
-    // 为 true 时先以未激活方式打开，再立刻 discard 成休眠状态（点开才真正加载，省内存），
-    // discard 失败只吞掉错误，不影响其他标签继续打开。
-    // 打开一个恢复的标签。休眠方式（4.4 需求五修 Bug）：旧做法是建完立刻 discard，
-    // 标签页还没提交导航就被冻结，网址会丢、激活后是空白页。改成等加载完成（网址已提交）再 discard；
-    // 加载卡住时 15 秒兜底（此时网址早已提交）。tabs.create 本身不支持直接建休眠标签（实测报错）。
-    function openRestoredTab(url, useDiscarded) {
+    // 为 true 时先以未激活方式打开，等加载完成（网址已提交）再 discard 成休眠状态（点开才真正加载，省内存）。
+    // tabs.create 本身不支持直接建休眠标签（实测报错）；建完立刻 discard 会让网址在提交前被冻结、激活后空白页。
+    // 4.5 需求一加固：4.4 上线后用户实测整体不休眠（助手在测试环境按真实 UI 流程复测是通过的，
+    // 怀疑真实环境里存在读到旧设置、或 discard 静默失败被吞掉的情况），本版做三件事：
+    // (1) 打开整组时现读设置，不用页面渲染时缓存的值（见 njOpenWholeGroup）；
+    // (2) discard 后回查标签状态确认真的休眠了，没生效自动重试（最多 3 次），失败原因不再吞掉；
+    // (3) 每次打开整组（且本应有休眠标签时）把结果汇总写一条日志（动作 discardOpen，进操作日志区），
+    //     用户在日志页就能看到直开/休眠成功/休眠失败各多少、失败原因是什么。
+    function openRestoredTab(url, useDiscarded, batch) {
         if (!useDiscarded) {
             chrome.tabs.create({
                 url: url
@@ -739,27 +819,141 @@
             url: url, active: false
         }, function (tab) {
             if (!tab || !tab.id) {
+                njDiscardSettle(batch, false, "标签创建失败");
                 return;
             }
             let tabId = tab.id;
-            let done = false;
-            function doDiscard() {
-                if (done) return;
-                done = true;
+            let begun = false;
+            let settled = false;
+            let pollTimer = null;
+            function settle(ok, errMsg) {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                if (pollTimer) {
+                    clearInterval(pollTimer);
+                }
                 chrome.tabs.onUpdated.removeListener(listener);
+                njDiscardSettle(batch, ok, errMsg);
+            }
+            function tryDiscard(attempt) {
                 chrome.tabs.discard(tabId, function () {
-                    void chrome.runtime.lastError;
+                    let err = chrome.runtime.lastError;
+                    if (!err) {
+                        chrome.tabs.get(tabId, function (t) {
+                            void chrome.runtime.lastError;
+                            if (t && t.discarded) {
+                                settle(true);
+                            } else if (attempt < 2) {
+                                setTimeout(function () { tryDiscard(attempt + 1); }, 800);
+                            } else {
+                                settle(false, "休眠指令已发但状态未生效");
+                            }
+                        });
+                    } else if (attempt < 2) {
+                        setTimeout(function () { tryDiscard(attempt + 1); }, 800);
+                    } else {
+                        settle(false, (err && err.message) || "休眠失败");
+                    }
                 });
+            }
+            function beginDiscard() {
+                if (begun || settled) {
+                    return;
+                }
+                begun = true;
+                chrome.tabs.onUpdated.removeListener(listener);
+                tryDiscard(0);
             }
             function listener(id, changeInfo) {
                 if (id === tabId && changeInfo.status === 'complete') {
-                    doDiscard();
+                    beginDiscard();
                 }
             }
             chrome.tabs.onUpdated.addListener(listener);
-            setTimeout(doDiscard, 15000);
+            // 轮询兜底：完成事件偶尔漏掉时靠轮询发现加载完成
+            let pollCount = 0;
+            pollTimer = setInterval(function () {
+                pollCount += 1;
+                if (begun || settled || pollCount > 40) {
+                    if (pollTimer) {
+                        clearInterval(pollTimer);
+                    }
+                    return;
+                }
+                chrome.tabs.get(tabId, function (t) {
+                    if (chrome.runtime.lastError) {
+                        settle(false, "标签已被关闭");
+                        return;
+                    }
+                    if (t && t.status === 'complete') {
+                        beginDiscard();
+                    }
+                });
+            }, 700);
+            // 20 秒硬兜底：此时网址早已提交，直接尝试休眠
+            setTimeout(function () {
+                beginDiscard();
+            }, 20000);
             if (tab.status === 'complete') {
-                doDiscard();
+                beginDiscard();
+            }
+        });
+    }
+
+    // 休眠结果记账：一个组里应休眠的标签全部尘埃落定后，汇总写一条日志
+    function njDiscardSettle(batch, ok, errMsg) {
+        if (!batch) {
+            return;
+        }
+        batch.settled += 1;
+        if (ok) {
+            batch.ok += 1;
+        } else {
+            batch.fail += 1;
+            if (errMsg && !batch.err) {
+                batch.err = errMsg;
+            }
+        }
+        if (batch.settled >= batch.expect) {
+            let detail = batch.label + "：" + batch.direct + " 条直开、" + batch.ok + " 条休眠成功";
+            if (batch.fail) {
+                detail += "、" + batch.fail + " 条休眠失败" + (batch.err ? ("（" + batch.err + "）") : "");
+            }
+            njLogEvent("discardOpen", batch.fail === 0, detail);
+        }
+    }
+
+    // 打开整组（4.5 需求一）：点击时现读休眠开关与阈值，不用渲染时缓存的值——
+    // 页面开着时在别处改了设置、或页面长时间没重渲染，都不会再读到旧设置。
+    // 打开时删除整组仍排在建标签之前（原注释：顺序反了就不生效）。
+    function njOpenWholeGroup(group, isLock, groupTitle, removeGroupFn) {
+        chrome.storage.local.get(["options", "restoreDiscarded", "discardedThreshold"], function (storage) {
+            let tabsArr = group.tabs().slice();
+            let opts = storage.options || {};
+            if (opts.deleteTabOnOpen === 'yes') {
+                if (!isLock && removeGroupFn) {
+                    removeGroupFn();
+                }
+            }
+            let rd = storage.restoreDiscarded === true;
+            let n = parseInt(storage.discardedThreshold, 10);
+            if (!(n >= 1)) {
+                n = 10;
+            }
+            let batch = null;
+            if (rd && tabsArr.length > n) {
+                batch = {
+                    label: groupTitle || "",
+                    direct: n,
+                    expect: tabsArr.length - n,
+                    settled: 0, ok: 0, fail: 0, err: ""
+                };
+            }
+            for (let j = 0; j < tabsArr.length; j += 1) {
+                let useDiscarded = rd && tabsArr.length > n && j >= n;
+                openRestoredTab(tabsArr[j].url, useDiscarded, useDiscarded ? batch : null);
             }
         });
     }
@@ -773,7 +967,7 @@
     // 在搜索框输词按回车，整页切换到搜索页（#search）：首页发起搜主列表、回收站发起搜回收站，两边不混。
     // 结果按 50 组一段分段（搜索范围仍是全量）；每条标签行首有删除与跳转两个图标，间距拉开防误点；
     // 锁定组的删除图标先显示为小锁，点小锁单条解锁（只当次有效）后才出现删除图标；删单条不确认。
-    let njSearchState = {keyword: "", source: "home", limit: 50, unlocked: {}, scrollY: null};
+    let njSearchState = {keyword: "", source: "home", page: 0, unlocked: {}, scrollY: null};
     // 4.4 需求三补强：首页锁定组单条解锁的内存标记（组id|网址+标题）。只在页面内存里、绝不落盘、页面重载即清；
     // 有了它，对账重渲染也不会把刚解锁的删除叉打回小锁（解锁仍只当次有效，关掉/刷新页面即恢复小锁）
     let njHomeUnlockedTabs = new Set();
@@ -789,7 +983,7 @@
         }
         // 4.4.1 审查问题二：在搜索页里再按回车时沿用已有来源（从回收站进来就一直只搜回收站），不能掉回主页
         let njSearchSource = njCurrentPage === "#baks" ? "baks" : (njCurrentPage === "#search" ? njSearchState.source : "home");
-        njSearchState = {keyword: keyword, source: njSearchSource, limit: 50, unlocked: {}, scrollY: null};
+        njSearchState = {keyword: keyword, source: njSearchSource, page: 0, unlocked: {}, scrollY: null};
         window.location.hash = "#search";
     }
 
@@ -835,24 +1029,20 @@
         });
     }
 
-    // 跳转到所在组：回来源页，必要时先把分段上限扩到能含住该组，渲染后滚动定位并高亮一下
+    // 跳转到所在组：回来源页，先切到该组所在页（4.5 正式分页），渲染后滚动定位并高亮一下
     function njJumpToGroup(source, gi) {
         if (source === "baks") {
-            if (gi >= njBaksRenderLimit) {
-                njBaksRenderLimit = (Math.floor(gi / 50) + 1) * 50;
-            }
+            njBaksPage = Math.floor(gi / NJ_PAGE_SIZE);
             window.location.hash = "#baks";
         } else {
-            if (gi >= njHomeRenderLimit) {
-                njHomeRenderLimit = (Math.floor(gi / 50) + 1) * 50;
-            }
+            njHomePage = Math.floor(gi / NJ_PAGE_SIZE);
             window.location.hash = "#home";
         }
         let tries = 0;
         let timer = setInterval(function () {
             tries += 1;
             let container = document.getElementById(source === "baks" ? "tabGroupsBak" : "tabGroups");
-            let el = container ? container.querySelectorAll(".tabs")[gi] : null;
+            let el = container ? container.querySelectorAll(".tabs")[gi % NJ_PAGE_SIZE] : null;
             if (el) {
                 clearInterval(timer);
                 el.scrollIntoView({block: "center"});
@@ -904,12 +1094,15 @@
                 emptyEl.textContent = chrome.i18n.getMessage("searchNoResults");
                 pageEl.appendChild(emptyEl);
             }
+            // 4.5 需求十四：搜索页也改正式分页，只渲染当前页的 50 组（搜索范围仍是全量）
+            njSearchState.page = njClampPage(njSearchState.page, res.groupCount);
+            let njSearchStart = njSearchState.page * NJ_PAGE_SIZE;
             let shown = 0;
             res.groups.forEach(function (group) {
-                if (shown >= njSearchState.limit) {
+                shown += 1;
+                if (shown <= njSearchStart || shown > njSearchStart + NJ_PAGE_SIZE) {
                     return;
                 }
-                shown += 1;
                 let groupEl = document.createElement("div");
                 groupEl.className = "search-result-group tabs";
                 let titleEl = document.createElement("div");
@@ -986,19 +1179,13 @@
                 groupEl.appendChild(ulEl);
                 pageEl.appendChild(groupEl);
             });
-            if (res.groupCount > njSearchState.limit) {
-                let moreWrap = document.createElement("div");
-                moreWrap.className = "nj-more-wrap";
-                let moreBtn = document.createElement("button");
-                moreBtn.className = "btn btn-default";
-                moreBtn.textContent = chrome.i18n.getMessage("logShowMore") + "\uff08" + (res.groupCount - njSearchState.limit) + "\uff09";
-                moreBtn.addEventListener("click", function () {
-                    njSearchState.limit += 50;
-                    njSearchState.scrollY = window.scrollY;
-                    showSearchPage();
-                });
-                moreWrap.appendChild(moreBtn);
-                pageEl.appendChild(moreWrap);
+            let njSearchPager = njDomPager(res.groupCount, njSearchState.page, function (pg) {
+                njSearchState.page = pg;
+                njSearchState.scrollY = 0;
+                showSearchPage();
+            });
+            if (njSearchPager) {
+                pageEl.appendChild(njSearchPager);
             }
             if (njSearchState.scrollY !== null && njSearchState.scrollY !== undefined) {
                 window.scrollTo(0, njSearchState.scrollY);
@@ -1059,14 +1246,13 @@
                             <a href="#gist">${chrome.i18n.getMessage("navGistBackup")}</a>
                             <a href="#webdav">${chrome.i18n.getMessage("navWebdav")}</a>
                             <a href="#importExport">${chrome.i18n.getMessage("importExport")}</a>
+                            <a href="#logs">${chrome.i18n.getMessage("showLog")}</a>
                             <a href="#baks"><span id="showBaks">${chrome.i18n.getMessage("showBaks")}</span></a>
                             <button type="button" id="themeCycleBtn" class="nj-theme-btn"></button>
                         </div>
                         <div class="nj-menu-row nj-menu-row2">
                             <a href="#options">${chrome.i18n.getMessage("optionsValue")}</a>
-                            <a href="#logs">${chrome.i18n.getMessage("showLog")}</a>
-                            <span id="totals" class="nj-status"></span>
-                            <span id="usage" class="nj-status"></span>
+                            <span class="nj-status-group"><span id="totals" class="nj-status"></span></span>
                         </div>
                     </div>
                 </div>
@@ -1173,9 +1359,7 @@ https://www.google.com | Google
             chrome.storage.local.getBytesInUse(null, function (bytes) {
                 isStateOne = false
                 console.log("total is " + (bytes / 1024 / 1024).toFixed(3) + "mb");
-                let usageEl = document.getElementById('usage');
-                usageEl.innerHTML = `${chrome.i18n.getMessage("usedSpace")}${(bytes / 1024 / 1024).toFixed(3)}mb`;
-                usageEl.title = `${((bytes / 1024 / 1024) / 10 * 100).toFixed(2)} %${chrome.i18n.getMessage("usageOfRef")}`;
+                // 4.5.1 修复：#usage 旧状态元素已随需求十一改版废弃（体积并入 #totals 一处显示），不再写它，免得残留旧格式文字并盖住菜单
             });
 
             // 应用保存的主题设置（没保存过时为 undefined，applyTheme 按 auto 跟随系统处理）
@@ -1447,7 +1631,12 @@ https://www.google.com | Google
                 collectBackupSettings(function (settings) {
                     let backup = buildBackupObject(items, undefined, settings);
                     downloadTextFile("NJ-Tab-Backup-" + formatBackupTimestamp(new Date()) + ".json", JSON.stringify(backup, null, 2), "application/json");
-                    njLogEvent("exportBackup", true, "");
+                    // 4.5 需求七：导出备份也要写日志，带组数/条数/回收站组数条数
+                    let expMainTabs = 0;
+                    backup.tabGroups.forEach(function (g) { expMainTabs += (g.tabs || []).length; });
+                    let expDelTabs = 0;
+                    backup.delTabGroups.forEach(function (g) { expDelTabs += (g.tabs || []).length; });
+                    njLogEvent("exportBackup", true, "导出 " + backup.tabGroups.length + " 组 / " + expMainTabs + " 条" + (backup.delTabGroups.length > 0 ? "、回收站 " + backup.delTabGroups.length + " 组 / " + expDelTabs + " 条" : ""));
                 });
             });
         });
@@ -1504,8 +1693,8 @@ https://www.google.com | Google
                             keptMain.push(g);
                         }
                     });
-                    // 统一追加到现有数据末尾（包括备份里的置顶组，不调整顺序）
-                    let merged = (Array.isArray(items.tabGroups) ? items.tabGroups : []).concat(keptMain);
+                    // 4.5 需求八：不再一律追加末尾——按组时间把导入组插进现有组之间（新在前），现有组顺序不动
+                    let merged = njMergeGroupsByTime(items.tabGroups, keptMain);
                     saveShardings(merged, "object");
                     let keptDel = [];
                     if (check.delTabGroups.length > 0) {
@@ -1519,13 +1708,18 @@ https://www.google.com | Google
                             }
                         });
                         if (keptDel.length > 0) {
-                            let mergedDel = (Array.isArray(items.delTabGroups) ? items.delTabGroups : []).concat(keptDel);
+                            let mergedDel = njMergeGroupsByTime(items.delTabGroups, keptDel);
                             saveShardings(mergedDel, "del");
                         }
                     }
                     let settingsRestored = applyBackupSettings(backup.settings);
                     let dupNote = dupSkipped > 0 ? `\n${dupSkipped}${chrome.i18n.getMessage("dedupSkipped")}` : "";
-                    njLogEvent("importBackup", true, "导入 " + keptMain.length + " 组" + (keptDel.length > 0 ? "、回收站 " + keptDel.length + " 组" : "") + (check.skipped.length > 0 ? "，跳过 " + check.skipped.length + " 条" : "") + (dupSkipped > 0 ? "，去重跳过 " + dupSkipped + " 条" : ""));
+                    // 4.5 需求九：导入日志补上条数（主列表多少条、回收站多少条，去重后实际并入的数量）
+                    let keptMainTabs = 0;
+                    keptMain.forEach(function (g) { keptMainTabs += (g.tabs || []).length; });
+                    let keptDelTabs = 0;
+                    keptDel.forEach(function (g) { keptDelTabs += (g.tabs || []).length; });
+                    njLogEvent("importBackup", true, "导入 " + keptMain.length + " 组 / " + keptMainTabs + " 条" + (keptDel.length > 0 ? "、回收站 " + keptDel.length + " 组 / " + keptDelTabs + " 条" : "") + (check.skipped.length > 0 ? "，跳过 " + check.skipped.length + " 条" : "") + (dupSkipped > 0 ? "，去重跳过 " + dupSkipped + " 条" : ""));
                     if (settingsRestored) {
                         alert(`${chrome.i18n.getMessage("backupImportSuccess")}${chrome.i18n.getMessage("settingsAlsoRestored")}${skippedNote}${dupNote}`);
                     } else {
@@ -1547,8 +1741,18 @@ https://www.google.com | Google
             let nameEl = document.getElementById('importBackupFileName');
             if (nameEl) {
                 nameEl.textContent = (event.target.files && event.target.files[0]) ? event.target.files[0].name : "";
+                try { sessionStorage.setItem('njLastImportFileName', nameEl.textContent); } catch (e) {}
             }
         });
+
+        // 导入成功后页面会整页刷新，这里把刷新前选好的文件名恢复显示（4.5.1 修复）
+        try {
+            let savedImportName = sessionStorage.getItem('njLastImportFileName');
+            let importNameEl = document.getElementById('importBackupFileName');
+            if (savedImportName && importNameEl && !importNameEl.textContent) {
+                importNameEl.textContent = savedImportName;
+            }
+        } catch (e) {}
 
         // 持续监听通知框的按钮点击事件，点了就清除通知框
         chrome.notifications.onButtonClicked.addListener(function callback(notificationId, buttonIndex) {
@@ -1642,6 +1846,14 @@ https://www.google.com | Google
             // 路由清空 hash 触发的那次空 hashchange 不能隐藏它，故只在真实导航到别的页时才藏
             if (currentHash && currentHash !== "#search") {
                 $("#searchPage").addClass("hide");
+            }
+            // 4.5 需求十三：切换到别的页面时自动清空搜索框里的词（搜索页本身不清，免得把正在用的词抹掉）
+            if (currentHash && currentHash !== "#search") {
+                let njSearchInputEl = document.getElementById("searchInput");
+                if (njSearchInputEl && njSearchInputEl.value) {
+                    njSearchInputEl.value = "";
+                    njSearchInputEl.dispatchEvent(new Event("input", {bubbles: true}));
+                }
             }
             // 根据不同的 hash 值显示对应的内容
             switch (currentHash) {
@@ -2253,13 +2465,13 @@ https://www.google.com | Google
                         pullFromGithubGistStatus = undefined;
                     }
                 } else {
-                    alert("根据gistId拉取gist失败了");
+                    alert("根据 Gist ID 拉取 Gist 失败了");
                     handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}`)
                     pullFromGithubGistStatus = undefined;
                 }
             },
             error: function (xhr, errorText, errorType) {
-                alert("根据gistId拉取gist报错了");
+                alert("根据 Gist ID 拉取 Gist 报错了");
                 handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}-->${xhr.responseText}`)
                 pullFromGithubGistStatus = undefined;
             },
@@ -2289,12 +2501,12 @@ https://www.google.com | Google
                     njLogEvent("gistPull", true, "GitHub");
                     handleGistLog.push(`${chrome.i18n.getMessage("pullSuccess")}`);
                 } else {
-                    alert("根据rawUrl拉取gist失败了");
+                    alert("根据 raw_url 拉取 Gist 失败了");
                     handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}`)
                 }
             },
             error: function (xhr, errorText, errorType) {
-                alert("根据rawUrl拉取gist报错了");
+                alert("根据 raw_url 拉取 Gist 报错了");
                 handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}-->${xhr.responseText}`)
             },
             complete: function () {
@@ -2330,12 +2542,12 @@ https://www.google.com | Google
                     applyBackupSettings(_content.settings);
                     handleGistLog.push(`${chrome.i18n.getMessage("pullSuccess")}`)
                 } else {
-                    alert("根据gistId拉取gist失败了");
+                    alert("根据 Gist ID 拉取 Gist 失败了");
                     handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}`)
                 }
             },
             error: function (xhr, errorText, errorType) {
-                alert("根据gistId拉取gist报错了");
+                alert("根据 Gist ID 拉取 Gist 报错了");
                 handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}-->${xhr.responseText}`)
             },
             complete: function () {
@@ -2415,12 +2627,12 @@ https://www.google.com | Google
                         }
                     }
                 } else {
-                    alert("获取所有gists时失败了");
+                    alert("获取所有 Gist 时失败了");
                     handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}`)
                 }
             },
             error: function (xhr, errorText, errorType) {
-                alert("获取所有gists时报错了");
+                alert("获取所有 Gist 时报错了");
                 handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}-->${xhr.responseText}`)
             },
             complete: function () {
@@ -2499,12 +2711,12 @@ https://www.google.com | Google
                         }
                     }
                 } else {
-                    alert("获取所有gists时失败了");
+                    alert("获取所有 Gist 时失败了");
                     handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}`)
                 }
             },
             error: function (xhr, errorText, errorType) {
-                alert("获取所有gists时报错了");
+                alert("获取所有 Gist 时报错了");
                 handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}-->${xhr.responseText}`)
             },
             complete: function () {
@@ -3298,8 +3510,116 @@ https://www.google.com | Google
         if (h === "#home" || h === "" || h === "#") { showAllTabs(); }
         if (h === "#baks") { showAllDelTabs(); }
     }
-    let njHomeRenderLimit = 50;
-    let njBaksRenderLimit = 50;
+    // 4.5 需求十四：正式分页替代「查看更多」——每页 50 组，当前页（从 0 起）记在下面两个变量里
+    const NJ_PAGE_SIZE = 50;
+    let njHomePage = 0;
+    let njBaksPage = 0;
+
+    function njClampPage(page, total) {
+        let pages = Math.max(1, Math.ceil((total || 0) / NJ_PAGE_SIZE));
+        if (page > pages - 1) { page = pages - 1; }
+        if (page < 0) { page = 0; }
+        return page;
+    }
+    // 页码窗口：当前页前后各 2 个，最多 5 个页码按钮
+    function njPagerWindow(cur, pages) {
+        let from = Math.max(0, Math.min(cur - 2, pages - 5));
+        let to = Math.min(pages, from + 5);
+        let nums = [];
+        for (let n = from; n < to; n++) { nums.push(n); }
+        return nums;
+    }
+    // mithril 版分页条（主页/回收站）：不够一页返回 null 不显示
+    function njMithrilPager(total, page, onGo) {
+        let pages = Math.max(1, Math.ceil((total || 0) / NJ_PAGE_SIZE));
+        if (pages <= 1) { return null; }
+        let cur = njClampPage(page, total);
+        function btn(label, target, opts) {
+            opts = opts || {};
+            return m("button.btn.btn-default.btn-sm" + (opts.active ? ".active" : ""), {
+                disabled: !!opts.disabled,
+                onclick: function () { if (!opts.disabled && !opts.active) { onGo(target); } }
+            }, label);
+        }
+        return m("div.nj-pager.filtered", [
+            btn(chrome.i18n.getMessage("pagerFirst"), 0, {disabled: cur === 0}),
+            btn(chrome.i18n.getMessage("pagerPrev"), cur - 1, {disabled: cur === 0}),
+            njPagerWindow(cur, pages).map(function (n) { return btn(String(n + 1), n, {active: n === cur}); }),
+            btn(chrome.i18n.getMessage("pagerNext"), cur + 1, {disabled: cur >= pages - 1}),
+            btn(chrome.i18n.getMessage("pagerLast"), pages - 1, {disabled: cur >= pages - 1}),
+            m("span.nj-pager-jump", [
+                chrome.i18n.getMessage("pagerJump"),
+                m("input.form-control.nj-pager-input", {
+                    type: "number", min: 1, max: pages,
+                    onkeydown: function (e) {
+                        if (e.key === "Enter") {
+                            let v = parseInt(e.target.value, 10);
+                            if (v >= 1 && v <= pages) { onGo(v - 1); }
+                        }
+                    }
+                }),
+                chrome.i18n.getMessage("pagerPageUnit") + "（" + chrome.i18n.getMessage("pagerTotal", [String(pages)]) + "）"
+            ])
+        ]);
+    }
+    // DOM 版分页条（搜索页）：不够一页返回 null 不显示
+    function njDomPager(total, page, onGo) {
+        let pages = Math.max(1, Math.ceil((total || 0) / NJ_PAGE_SIZE));
+        if (pages <= 1) { return null; }
+        let cur = njClampPage(page, total);
+        let wrap = document.createElement("div");
+        wrap.className = "nj-pager";
+        function btn(label, target, opts) {
+            opts = opts || {};
+            let b = document.createElement("button");
+            b.type = "button";
+            b.className = "btn btn-default btn-sm" + (opts.active ? " active" : "");
+            b.textContent = label;
+            if (opts.disabled) { b.disabled = true; }
+            b.addEventListener("click", function () { if (!opts.disabled && !opts.active) { onGo(target); } });
+            wrap.appendChild(b);
+        }
+        btn(chrome.i18n.getMessage("pagerFirst"), 0, {disabled: cur === 0});
+        btn(chrome.i18n.getMessage("pagerPrev"), cur - 1, {disabled: cur === 0});
+        njPagerWindow(cur, pages).forEach(function (n) { btn(String(n + 1), n, {active: n === cur}); });
+        btn(chrome.i18n.getMessage("pagerNext"), cur + 1, {disabled: cur >= pages - 1});
+        btn(chrome.i18n.getMessage("pagerLast"), pages - 1, {disabled: cur >= pages - 1});
+        let jump = document.createElement("span");
+        jump.className = "nj-pager-jump";
+        jump.appendChild(document.createTextNode(chrome.i18n.getMessage("pagerJump")));
+        let inp = document.createElement("input");
+        inp.type = "number";
+        inp.min = "1";
+        inp.max = String(pages);
+        inp.className = "form-control nj-pager-input";
+        inp.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") {
+                let v = parseInt(inp.value, 10);
+                if (v >= 1 && v <= pages) { onGo(v - 1); }
+            }
+        });
+        jump.appendChild(inp);
+        jump.appendChild(document.createTextNode(chrome.i18n.getMessage("pagerPageUnit") + "（" + chrome.i18n.getMessage("pagerTotal", [String(pages)]) + "）"));
+        wrap.appendChild(jump);
+        return wrap;
+    }
+
+    // 4.5 需求十一：状态提示改版——「已存：N组 / M条标签 已使用：X MB（Y%）」
+    // 体积 = 本地存储总占用（主页与回收站同口径），百分比以 10MB 为基准（用户指定）
+    function njUpdateTotals(el, prefixKey, groupCount, tabCount) {
+        if (!el) { return; }
+        let base = chrome.i18n.getMessage(prefixKey) + groupCount + chrome.i18n.getMessage("group") + " / " + tabCount + chrome.i18n.getMessage("statusTabsLabel");
+        el.innerHTML = base;
+        el.removeAttribute("title"); // 4.5.1 修复：状态文字不再复制一份到 title，免得鼠标悬停弹出与正文一模一样的重复提示
+        if (chrome.storage && chrome.storage.local && typeof chrome.storage.local.getBytesInUse === "function") {
+            chrome.storage.local.getBytesInUse(null, function (bytes) {
+                let mb = (bytes / 1048576).toFixed(2);
+                let pct = (bytes / 10485760 * 100).toFixed(1);
+                let full = base + " " + chrome.i18n.getMessage("statusUsage", [mb, pct]);
+                el.innerHTML = full;
+            });
+        }
+    }
 
     function njLoadData(cb) {
         if (njDataCache) {
@@ -3415,8 +3735,7 @@ https://www.google.com | Google
                 total += bridge[i].tabs.length;
             }
             let totalsEl = document.getElementById('totals');
-            totalsEl.innerHTML = `${chrome.i18n.getMessage("existed")}${i}${chrome.i18n.getMessage("group")}`;
-            totalsEl.title = `${chrome.i18n.getMessage("existed")}${i}${chrome.i18n.getMessage("group")} / ${total}${chrome.i18n.getMessage("totals")}`;
+            njUpdateTotals(totalsEl, "existed", i, total);
             // 4.4 需求六：两种拖拽同时可用——组与标签都带 my-handle，不再按 dragType 二选一
             let titleClass = ".my-handle", tabClass = ".my-handle";
             let tabs = {}, // to-be module
@@ -3572,9 +3891,12 @@ https://www.google.com | Google
                     return m('div', [m('div.jumbotron', [m('div', {style: "text-align:center; margin-bottom:50px"}, `${chrome.i18n.getMessage("noTabs")}`)])])
                 }
                 // foreach tab group
-                // 4.3 需求十：分段渲染——先只画前 njHomeRenderLimit 组，末尾带「查看更多」逐段展开；
-                // 前缀切片保证已渲染组的序号与完整列表序号一致，拖拽/点击的索引语义不变。搜索仍走全量数据。
-                let njGroupNodes = tabs.vm.list.slice(0, njHomeRenderLimit).map(function (group, i) {
+                // 4.5 需求十四：正式分页——每页只画 50 组，序号用全列表序号（页偏移+页内序号），
+                // 拖拽/点击的索引语义不变。搜索仍走全量数据。
+                njHomePage = njClampPage(njHomePage, tabs.vm.list.length);
+                let njPageStart = njHomePage * NJ_PAGE_SIZE;
+                let njGroupNodes = tabs.vm.list.slice(njPageStart, njPageStart + NJ_PAGE_SIZE).map(function (group, njPageIdx) {
+                    let i = njPageStart + njPageIdx;
                     // console.log(tabs.vm.list);
                     // console.log(group.tabs());
                     // console.log(i);
@@ -3659,22 +3981,11 @@ https://www.google.com | Google
                         }
                     }), m('span.restore-all', {
                         onclick: function (e) {
-                            let j;
                             let ci = currentGroupIndex((e && e.currentTarget) || this, i);
-
-                            // reason this goes first and not after is because it doesn't work otherwise
-                            // I imagine it's because you changed tab and stuff
-                            if (opts.deleteTabOnOpen === 'yes') {
-                                if (!isLock) {
-                                    tabs.vm.rmGroup(ci);
-                                }
-                            }
-                            for (j = 0; j < group.tabs().length; j += 1) {
-                                // 4.4 需求五：休眠只在开关开、且组内条数超过 N 时才用，且只休眠第 N 条之后的；
-                                // 前 N 条与不超过 N 的组都直接打开。关时与原行为完全一致。
-                                let useDiscarded = restoreDiscarded && group.tabs().length > discardedN && j >= discardedN;
-                                openRestoredTab(group.tabs()[j].url, useDiscarded);
-                            }
+                            // 4.5 需求一：打开整组走 njOpenWholeGroup——点击时现读休眠设置、汇总休眠结果写日志
+                            njOpenWholeGroup(group, isLock, groupTitle, function () {
+                                tabs.vm.rmGroup(ci);
+                            });
                         }
                     }, `${chrome.i18n.getMessage("restoreGroup")}`), m('span.about-lock', {
                         onclick: function (e) {
@@ -3792,13 +4103,13 @@ https://www.google.com | Google
                             }, tab.title), m('span.tab-add-time', njTabTimeText(tab, group.date()))]);
                         }))]);
                 });
-                if (tabs.vm.list.length > njHomeRenderLimit) {
-                    njGroupNodes.push(m('div.nj-more-wrap.filtered', [m('button.btn.btn-default', {
-                        onclick: function () {
-                            njHomeRenderLimit += 50;
-                            showAllTabs();
-                        }
-                    }, `${chrome.i18n.getMessage("logShowMore")}（${tabs.vm.list.length - njHomeRenderLimit}）`)]));
+                let njHomePagerNode = njMithrilPager(tabs.vm.list.length, njHomePage, function (pg) {
+                    njHomePage = pg;
+                    showAllTabs();
+                    window.scrollTo(0, 0);
+                });
+                if (njHomePagerNode) {
+                    njGroupNodes.push(njHomePagerNode);
                 }
                 return njGroupNodes;
             };
@@ -3839,14 +4150,17 @@ https://www.google.com | Google
                             // console.log(evt.oldDraggableIndex);
                             // console.log(evt.newDraggableIndex);
                             njDragActive = false;
-                            tabs.vm.moveGroup(evt.oldIndex, evt.newIndex);
+                            // 4.5 分页：evt 的序号是页内序号，换算成全列表序号再动数据
+                            let njGrpOld = evt.oldIndex + njHomePage * NJ_PAGE_SIZE;
+                            let njGrpNew = evt.newIndex + njHomePage * NJ_PAGE_SIZE;
+                            tabs.vm.moveGroup(njGrpOld, njGrpNew);
                             // 同步 mithril 的 vm.list 顺序：点击等事件后 mithril 会按 vm.list 做 diff 重绘，不同步会把顺序画回拖动前
-                            let movedGroup = tabs.vm.list.splice(evt.oldIndex, 1)[0];
+                            let movedGroup = tabs.vm.list.splice(njGrpOld, 1)[0];
                             if (movedGroup) {
-                                tabs.vm.list.splice(evt.newIndex, 0, movedGroup);
+                                tabs.vm.list.splice(njGrpNew, 0, movedGroup);
                             }
                             // 不再全量重渲染（Sortable 已把 DOM 节点移到正确位置），只同步写死在 DOM 上的序号/计数
-                            syncDragDomOrder("tabGroups", "");
+                            syncDragDomOrder("tabGroups", "", njHomePage * NJ_PAGE_SIZE);
                         }
                     });
 
@@ -3854,7 +4168,7 @@ https://www.google.com | Google
 
             {
                 let j;
-                for (j = 0; j < Math.min(bridge.length, njHomeRenderLimit); j += 1) {
+                for (j = njHomePage * NJ_PAGE_SIZE; j < Math.min(bridge.length, (njHomePage + 1) * NJ_PAGE_SIZE); j += 1) {
                     let sortableTab = Sortable.create(document.getElementById("tabs_" + j), {
                         group: {
                             name: "tabs", pull: true, put: true
@@ -3880,7 +4194,7 @@ https://www.google.com | Google
                             njDragActive = false;
                             tabs.vm.moveTab(evt.from.parentNode.id, evt.oldIndex, evt.to.parentNode.id, evt.newIndex)
                             // 标签数据数组与 vm.list 里组对象的 tabs 是同一引用，moveTab 已同步；不再全量重渲染，只同步 DOM 上的序号/计数
-                            syncDragDomOrder("tabGroups", "");
+                            syncDragDomOrder("tabGroups", "", njHomePage * NJ_PAGE_SIZE);
                         }
                     })
                     sortableTabList.push(sortableTab);
@@ -4371,7 +4685,8 @@ https://www.google.com | Google
             });
             applyMemory(v);
             el.value = "";
-            el.placeholder = chrome.i18n.getMessage("secretSavedPlaceholder");
+            // 4.5 需求三：保存后在提示里带上令牌末 3 位，方便认是哪一把令牌
+            el.placeholder = chrome.i18n.getMessage("secretSavedPlaceholder") + chrome.i18n.getMessage("secretSavedLast3") + v.slice(-3);
         });
     }
 
@@ -4486,9 +4801,6 @@ https://www.google.com | Google
               <div class="col-sm-5">
                 <div class="input-group">
                   <input type="password" class="form-control" id="githubToken" placeholder="${chrome.i18n.getMessage("input")}${chrome.i18n.getMessage("githubToken")}">
-                  <div class="input-group-addon">
-                    <span class="glyphicon glyphicon-eye-open" id="changeEye"></span>
-                  </div>
                 </div>
               </div>
             </div>
@@ -4497,9 +4809,6 @@ https://www.google.com | Google
               <div class="col-sm-5">
                 <div class="input-group">
                   <input type="password" class="form-control" id="giteeToken" placeholder="${chrome.i18n.getMessage("input")}${chrome.i18n.getMessage("giteeToken")}">
-                  <div class="input-group-addon">
-                    <span class="glyphicon glyphicon-eye-open" id="changeEye2"></span>
-                  </div>
                 </div>
               </div>
             </div>
@@ -4527,17 +4836,29 @@ https://www.google.com | Google
                         </select>
                     </p>
                     <p id="gistRateWarn" style="color:#c9302c;" class="hide">${chrome.i18n.getMessage("gistAutoRateWarn")}</p>
-                    <p>${chrome.i18n.getMessage("gistAutoStatusLabel")}: <span id="gistAutoStatus"></span></p>
+                    <p>${chrome.i18n.getMessage("gistAutoStatusLabel")} (GitHub): <span id="gistAutoStatusGithub"></span></p>
+                    <p>${chrome.i18n.getMessage("gistAutoStatusLabel")} (Gitee): <span id="gistAutoStatusGitee"></span></p>
                 </div>
             </div>
         `;
         chrome.storage.local.get(null, function (storage) {
             // 令牌不回填明文：已保存时只改输入框提示，留空表示不修改
+            // 4.5 需求三：提示里带上令牌末 3 位（解密只在本地进行，末3位之外不露）
             if (storage.githubGistToken) {
-                document.getElementById("githubToken").placeholder = `${chrome.i18n.getMessage("secretSavedPlaceholder")}`
+                njLoadSecretField("githubGistToken", function (plain) {
+                    let el = document.getElementById("githubToken");
+                    if (el) {
+                        el.placeholder = chrome.i18n.getMessage("secretSavedPlaceholder") + (plain ? (chrome.i18n.getMessage("secretSavedLast3") + plain.slice(-3)) : "");
+                    }
+                });
             }
             if (storage.giteeGistToken) {
-                document.getElementById("giteeToken").placeholder = `${chrome.i18n.getMessage("secretSavedPlaceholder")}`
+                njLoadSecretField("giteeGistToken", function (plain) {
+                    let el = document.getElementById("giteeToken");
+                    if (el) {
+                        el.placeholder = chrome.i18n.getMessage("secretSavedPlaceholder") + (plain ? (chrome.i18n.getMessage("secretSavedLast3") + plain.slice(-3)) : "");
+                    }
+                });
             }
             // 自动备份开关：新开关没设过时沿用旧 autoSync 的值
             let enabled = typeof storage.gistAutoEnabled !== "undefined" ? storage.gistAutoEnabled === true : storage.autoSync === true;
@@ -4548,48 +4869,28 @@ https://www.google.com | Google
             }
             document.getElementById("gistAutoInterval").value = String(interval);
             document.getElementById("gistRateWarn").classList.toggle("hide", interval > 15);
-            // 最近一次自动备份状态（后台备份时写入 gistAutoLastResult）
-            let statusEl = document.getElementById("gistAutoStatus");
-            let r = storage.gistAutoLastResult;
-            if (!r) {
-                statusEl.textContent = chrome.i18n.getMessage("gistAutoStatusNone");
-            } else {
-                let when = new Date(r.time).toLocaleString();
-                let provider = r.provider === "gitee" ? "Gitee" : "GitHub";
-                if (r.result === "success") {
-                    statusEl.textContent = `${chrome.i18n.getMessage("gistAutoStatusSuccess")} (${provider} ${when})`;
-                } else if (r.result === "skipped") {
-                    statusEl.textContent = `${chrome.i18n.getMessage("gistAutoStatusSkipped")} (${provider} ${when})`;
-                } else {
-                    statusEl.textContent = `${chrome.i18n.getMessage("gistAutoStatusFailed")} (${provider} ${when}${r.reason ? ": " + r.reason : ""})`;
+            // 最近一次自动备份状态（4.5 需求五：GitHub、Gitee 各显示自己最新的一条，不再互相顶掉；
+            // 后台按仓库分别存 gistAutoLastResultGithub / gistAutoLastResultGitee，老的合并记录按其仓库兜底）
+            let fmtAutoStatus = function (r) {
+                if (!r) {
+                    return chrome.i18n.getMessage("gistAutoStatusNone");
                 }
-            }
+                let when = new Date(r.time).toLocaleString();
+                if (r.result === "success") {
+                    return `${chrome.i18n.getMessage("gistAutoStatusSuccess")} (${when})`;
+                }
+                if (r.result === "skipped") {
+                    return `${chrome.i18n.getMessage("gistAutoStatusSkipped")} (${when})`;
+                }
+                return `${chrome.i18n.getMessage("gistAutoStatusFailed")} (${when}${r.reason ? ": " + r.reason : ""})`;
+            };
+            let legacyAuto = storage.gistAutoLastResult;
+            let rGithub = storage.gistAutoLastResultGithub || (legacyAuto && legacyAuto.provider === "github" ? legacyAuto : null);
+            let rGitee = storage.gistAutoLastResultGitee || (legacyAuto && legacyAuto.provider === "gitee" ? legacyAuto : null);
+            document.getElementById("gistAutoStatusGithub").textContent = fmtAutoStatus(rGithub);
+            document.getElementById("gistAutoStatusGitee").textContent = fmtAutoStatus(rGitee);
         });
 
-        document.getElementById('changeEye').addEventListener('click', function () {
-            let passwordInput = document.getElementById("githubToken");
-            let visibilityIcon = document.getElementById("changeEye");
-
-            if (passwordInput.type === "password") {
-                passwordInput.type = "text";
-                visibilityIcon.className = "glyphicon glyphicon-eye-close";
-            } else {
-                passwordInput.type = "password";
-                visibilityIcon.className = "glyphicon glyphicon-eye-open";
-            }
-        });
-        document.getElementById('changeEye2').addEventListener('click', function () {
-            let passwordInput = document.getElementById("giteeToken");
-            let visibilityIcon = document.getElementById("changeEye2");
-
-            if (passwordInput.type === "password") {
-                passwordInput.type = "text";
-                visibilityIcon.className = "glyphicon glyphicon-eye-close";
-            } else {
-                passwordInput.type = "password";
-                visibilityIcon.className = "glyphicon glyphicon-eye-open";
-            }
-        });
 
         // 令牌改完自动保存（加密存，同时更新内存里的值）
         njBindSecretAutoSave("githubToken", "githubGistToken", function (v) {
@@ -4735,136 +5036,135 @@ https://www.google.com | Google
     }
 
 
+    // 4.5 需求二：点推送/拉取先验令牌——没存令牌直接报错提示，不弹二次确认；存了才走确认流程
+    function njGistCheckTokenFirst(tokenKey, noSavedMsgKey, proceed) {
+        chrome.storage.local.get(tokenKey, function (st) {
+            if (!st[tokenKey]) {
+                showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage(noSavedMsgKey)}` + "\n" + `${chrome.i18n.getMessage("goToOptions")}`);
+                return;
+            }
+            proceed();
+        });
+    }
+
     // Gist 页四个推送/拉取按钮的绑定（原顶部菜单里的绑定，4.2 随按钮一起搬到 Gist 页）
     function bindGistPageButtons() {
         // 响应推送到github的gist的动作
         document.getElementById('pushToGithubGist').addEventListener('click', function () {
-            showDoubleConfirmation(`${chrome.i18n.getMessage("pushToGithubGist")}`, `${chrome.i18n.getMessage("gistPushOverwriteWarn")}`, function () {
-                console.log("yes");
-                chrome.storage.local.get(null, function (storage) {
-                    if (!storage.githubGistToken) {
-                        console.log("githubGistToken没有保存");
-                        showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("githubTokenNoSaved")}` + "\n" + `${chrome.i18n.getMessage("goToOptions")}`)
-                        return
-                    }
-                    console.log(storage.handleGithubGistStatus);
-                    if (storage.handleGithubGistStatus) {
-                        console.log("handleGistStatus有值");
-                        if (storage.handleGithubGistStatus.type === "IDLE") {
-                            pushToGithubGist();
-                        } else {
-                            let time = moment().format('YYYY-MM-DD HH:mm:ss');
-                            let expireTime = storage.handleGithubGistStatus.expireTime;
-                            console.log(expireTime)
-                            if (time > expireTime) {
+            njGistCheckTokenFirst("githubGistToken", "githubTokenNoSaved", function () {
+                showDoubleConfirmation(`${chrome.i18n.getMessage("pushToGithubGist")}`, `${chrome.i18n.getMessage("gistPushOverwriteWarn")}`, function () {
+                    console.log("yes");
+                    chrome.storage.local.get(null, function (storage) {
+                        console.log(storage.handleGithubGistStatus);
+                        if (storage.handleGithubGistStatus) {
+                            console.log("handleGistStatus有值");
+                            if (storage.handleGithubGistStatus.type === "IDLE") {
                                 pushToGithubGist();
                             } else {
-                                alert(storage.handleGithubGistStatus.type);
+                                let time = moment().format('YYYY-MM-DD HH:mm:ss');
+                                let expireTime = storage.handleGithubGistStatus.expireTime;
+                                console.log(expireTime)
+                                if (time > expireTime) {
+                                    pushToGithubGist();
+                                } else {
+                                    alert(storage.handleGithubGistStatus.type);
+                                }
                             }
+                        } else {
+                            console.log("handleGistStatus没有值，第一次");
+                            pushToGithubGist();
                         }
-                    } else {
-                        console.log("handleGistStatus没有值，第一次");
-                        pushToGithubGist();
-                    }
+                    });
                 });
             });
         });
 
         // 响应推送到gitee的gist的动作
         document.getElementById('pushToGiteeGist').addEventListener('click', function () {
-            showDoubleConfirmation(`${chrome.i18n.getMessage("pushToGiteeGist")}`, `${chrome.i18n.getMessage("gistPushOverwriteWarn")}`, function () {
-                console.log("yes");
-                chrome.storage.local.get(null, function (storage) {
-                    if (!storage.giteeGistToken) {
-                        console.log("giteeGistToken没有保存");
-                        showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("giteeTokenNoSaved")}` + "\n" + `${chrome.i18n.getMessage("goToOptions")}`)
-                        return
-                    }
-                    console.log(storage.handleGiteeGistStatus);
-                    if (storage.handleGiteeGistStatus) {
-                        console.log("handleGistStatus有值");
-                        if (storage.handleGiteeGistStatus.type === "IDLE") {
-                            pushToGiteeGist();
-                        } else {
-                            let time = moment().format('YYYY-MM-DD HH:mm:ss');
-                            let expireTime = storage.handleGiteeGistStatus.expireTime;
-                            console.log(expireTime)
-                            if (time > expireTime) {
+            njGistCheckTokenFirst("giteeGistToken", "giteeTokenNoSaved", function () {
+                showDoubleConfirmation(`${chrome.i18n.getMessage("pushToGiteeGist")}`, `${chrome.i18n.getMessage("gistPushOverwriteWarn")}`, function () {
+                    console.log("yes");
+                    chrome.storage.local.get(null, function (storage) {
+                        console.log(storage.handleGiteeGistStatus);
+                        if (storage.handleGiteeGistStatus) {
+                            console.log("handleGistStatus有值");
+                            if (storage.handleGiteeGistStatus.type === "IDLE") {
                                 pushToGiteeGist();
                             } else {
-                                alert(storage.handleGiteeGistStatus.type);
+                                let time = moment().format('YYYY-MM-DD HH:mm:ss');
+                                let expireTime = storage.handleGiteeGistStatus.expireTime;
+                                console.log(expireTime)
+                                if (time > expireTime) {
+                                    pushToGiteeGist();
+                                } else {
+                                    alert(storage.handleGiteeGistStatus.type);
+                                }
                             }
+                        } else {
+                            console.log("handleGistStatus没有值，第一次");
+                            pushToGiteeGist();
                         }
-                    } else {
-                        console.log("handleGistStatus没有值，第一次");
-                        pushToGiteeGist();
-                    }
+                    });
                 });
             });
         });
 
         // 响应从github的gist拉取的动作
         document.getElementById('pullFromGithubGist').addEventListener('click', function () {
-            showDoubleConfirmation(`${chrome.i18n.getMessage("pullFromGithubGist")}`, `${chrome.i18n.getMessage("gistPullOverwriteWarn")}`, function () {
-                console.log("yes");
-                chrome.storage.local.get(null, function (storage) {
-                    if (!storage.githubGistToken) {
-                        console.log("githubGistToken没有保存");
-                        showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("githubTokenNoSaved")}` + "\n" + `${chrome.i18n.getMessage("goToOptions")}`)
-                        return
-                    }
-                    console.log(storage.handleGithubGistStatus);
-                    if (storage.handleGithubGistStatus) {
-                        console.log("handleGistStatus有值");
-                        if (storage.handleGithubGistStatus.type === "IDLE") {
-                            pullFromGithubGist();
-                        } else {
-                            let time = moment().format('YYYY-MM-DD HH:mm:ss');
-                            let expireTime = storage.handleGithubGistStatus.expireTime;
-                            console.log(expireTime)
-                            if (time > expireTime) {
+            njGistCheckTokenFirst("githubGistToken", "githubTokenNoSaved", function () {
+                showDoubleConfirmation(`${chrome.i18n.getMessage("pullFromGithubGist")}`, `${chrome.i18n.getMessage("gistPullOverwriteWarn")}`, function () {
+                    console.log("yes");
+                    chrome.storage.local.get(null, function (storage) {
+                        console.log(storage.handleGithubGistStatus);
+                        if (storage.handleGithubGistStatus) {
+                            console.log("handleGistStatus有值");
+                            if (storage.handleGithubGistStatus.type === "IDLE") {
                                 pullFromGithubGist();
                             } else {
-                                alert(storage.handleGithubGistStatus.type);
+                                let time = moment().format('YYYY-MM-DD HH:mm:ss');
+                                let expireTime = storage.handleGithubGistStatus.expireTime;
+                                console.log(expireTime)
+                                if (time > expireTime) {
+                                    pullFromGithubGist();
+                                } else {
+                                    alert(storage.handleGithubGistStatus.type);
+                                }
                             }
+                        } else {
+                            console.log("handleGistStatus没有值，第一次");
+                            pullFromGithubGist();
                         }
-                    } else {
-                        console.log("handleGistStatus没有值，第一次");
-                        pullFromGithubGist();
-                    }
+                    });
                 });
             });
         });
 
         // 响应从gitee的gist拉取的动作
         document.getElementById('pullFromGiteeGist').addEventListener('click', function () {
-            showDoubleConfirmation(`${chrome.i18n.getMessage("pullFromGiteeGist")}`, `${chrome.i18n.getMessage("gistPullOverwriteWarn")}`, function () {
-                console.log("yes");
-                chrome.storage.local.get(null, function (storage) {
-                    if (!storage.giteeGistToken) {
-                        console.log("giteeGistToken没有保存");
-                        showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("giteeTokenNoSaved")}` + "\n" + `${chrome.i18n.getMessage("goToOptions")}`)
-                        return
-                    }
-                    console.log(storage.handleGiteeGistStatus);
-                    if (storage.handleGiteeGistStatus) {
-                        console.log("handleGistStatus有值");
-                        if (storage.handleGiteeGistStatus.type === "IDLE") {
-                            pullFromGiteeGist();
-                        } else {
-                            let time = moment().format('YYYY-MM-DD HH:mm:ss');
-                            let expireTime = storage.handleGiteeGistStatus.expireTime;
-                            console.log(expireTime)
-                            if (time > expireTime) {
+            njGistCheckTokenFirst("giteeGistToken", "giteeTokenNoSaved", function () {
+                showDoubleConfirmation(`${chrome.i18n.getMessage("pullFromGiteeGist")}`, `${chrome.i18n.getMessage("gistPullOverwriteWarn")}`, function () {
+                    console.log("yes");
+                    chrome.storage.local.get(null, function (storage) {
+                        console.log(storage.handleGiteeGistStatus);
+                        if (storage.handleGiteeGistStatus) {
+                            console.log("handleGistStatus有值");
+                            if (storage.handleGiteeGistStatus.type === "IDLE") {
                                 pullFromGiteeGist();
                             } else {
-                                alert(storage.handleGiteeGistStatus.type);
+                                let time = moment().format('YYYY-MM-DD HH:mm:ss');
+                                let expireTime = storage.handleGiteeGistStatus.expireTime;
+                                console.log(expireTime)
+                                if (time > expireTime) {
+                                    pullFromGiteeGist();
+                                } else {
+                                    alert(storage.handleGiteeGistStatus.type);
+                                }
                             }
+                        } else {
+                            console.log("handleGistStatus没有值，第一次");
+                            pullFromGiteeGist();
                         }
-                    } else {
-                        console.log("handleGistStatus没有值，第一次");
-                        pullFromGiteeGist();
-                    }
+                    });
                 });
             });
         });
@@ -5028,8 +5328,7 @@ https://www.google.com | Google
                 total += del_bridge[i].tabs.length;
             }
             let totalsEl = document.getElementById('totals');
-            totalsEl.innerHTML = `${chrome.i18n.getMessage("deleted")}${i}${chrome.i18n.getMessage("group")}`;
-            totalsEl.title = `${chrome.i18n.getMessage("deleted")}${i}${chrome.i18n.getMessage("group")} / ${total}${chrome.i18n.getMessage("totals")}`;
+            njUpdateTotals(totalsEl, "deleted", i, total);
             // 4.4 需求六：两种拖拽同时可用——组与标签都带 my-handle，不再按 dragType 二选一
             let titleClass = ".my-handle", tabClass = ".my-handle";
             let tabs = {}, // to-be module
@@ -5265,8 +5564,11 @@ https://www.google.com | Google
                 if (tabs.vm.list.length === 0) {
                     return m('div', [delTipBar(), m('div.jumbotron', [m('div', {style: "text-align:center; margin-bottom:50px"}, `${chrome.i18n.getMessage("noDelTabs")}`)])])
                 }
-                // foreach tab group（4.3 需求十：与主列表一样分段渲染，前缀切片保序号一致）
-                let njDelNodes = [delTipBar()].concat(tabs.vm.list.slice(0, njBaksRenderLimit).map(function (group, i) {
+                // foreach tab group（4.5 需求十四：与主列表一样正式分页，序号用全列表序号）
+                njBaksPage = njClampPage(njBaksPage, tabs.vm.list.length);
+                let njDelStart = njBaksPage * NJ_PAGE_SIZE;
+                let njDelNodes = [delTipBar()].concat(tabs.vm.list.slice(njDelStart, njDelStart + NJ_PAGE_SIZE).map(function (group, njDelIdx) {
+                    let i = njDelStart + njDelIdx;
                     // console.log(tabs.vm.list);
                     // console.log(group.tabs());
                     // console.log(i);
@@ -5320,22 +5622,11 @@ https://www.google.com | Google
                         id: "del_groupTitle" + i
                     }, groupTitle), m('span.group-date', njDelGroupTimeText(group)), ' ', delRemainingNode(group.deletedAt()), ' ', m('span.restore-all', {
                         onclick: function (e) {
-                            let j;
                             let ci = currentGroupIndex((e && e.currentTarget) || this, i);
-
-                            // reason this goes first and not after is because it doesn't work otherwise
-                            // I imagine it's because you changed tab and stuff
-                            if (opts.deleteTabOnOpen === 'yes') {
-                                if (!isLock) {
-                                    tabs.vm.rmGroup(ci);
-                                }
-                            }
-                            for (j = 0; j < group.tabs().length; j += 1) {
-                                // 4.4 需求五：休眠只在开关开、且组内条数超过 N 时才用，且只休眠第 N 条之后的；
-                                // 前 N 条与不超过 N 的组都直接打开。关时与原行为完全一致。
-                                let useDiscarded = restoreDiscarded && group.tabs().length > discardedN && j >= discardedN;
-                                openRestoredTab(group.tabs()[j].url, useDiscarded);
-                            }
+                            // 4.5 需求一：打开整组走 njOpenWholeGroup——点击时现读休眠设置、汇总休眠结果写日志
+                            njOpenWholeGroup(group, isLock, groupTitle, function () {
+                                tabs.vm.rmGroup(ci);
+                            });
                         }
                     }, `${chrome.i18n.getMessage("restoreGroup")}`), m('span.delete-all', {
                         onclick: function (e) {
@@ -5395,13 +5686,13 @@ https://www.google.com | Google
                             }, tab.title), m('span.tab-add-time', njTabTimeText(tab, group.date()))]);
                         }))]);
                 }));
-                if (tabs.vm.list.length > njBaksRenderLimit) {
-                    njDelNodes.push(m('div.nj-more-wrap.filtered', [m('button.btn.btn-default', {
-                        onclick: function () {
-                            njBaksRenderLimit += 50;
-                            showAllDelTabs();
-                        }
-                    }, `${chrome.i18n.getMessage("logShowMore")}（${tabs.vm.list.length - njBaksRenderLimit}）`)]));
+                let njBaksPagerNode = njMithrilPager(tabs.vm.list.length, njBaksPage, function (pg) {
+                    njBaksPage = pg;
+                    showAllDelTabs();
+                    window.scrollTo(0, 0);
+                });
+                if (njBaksPagerNode) {
+                    njDelNodes.push(njBaksPagerNode);
                 }
                 return njDelNodes;
             };
@@ -5446,14 +5737,17 @@ https://www.google.com | Google
                         },
                         onEnd: function (evt) { //拖拽完毕之后发生该事件
                             njDragActive = false;
-                            tabs.vm.moveGroup(evt.oldDraggableIndex, evt.newDraggableIndex);
+                            // 4.5 分页：evt 的序号是页内序号，换算成全列表序号再动数据
+                            let njDelOld = evt.oldDraggableIndex + njBaksPage * NJ_PAGE_SIZE;
+                            let njDelNew = evt.newDraggableIndex + njBaksPage * NJ_PAGE_SIZE;
+                            tabs.vm.moveGroup(njDelOld, njDelNew);
                             // 同步 mithril 的 vm.list 顺序：点击等事件后 mithril 会按 vm.list 做 diff 重绘，不同步会把顺序画回拖动前
-                            let movedGroup = tabs.vm.list.splice(evt.oldDraggableIndex, 1)[0];
+                            let movedGroup = tabs.vm.list.splice(njDelOld, 1)[0];
                             if (movedGroup) {
-                                tabs.vm.list.splice(evt.newDraggableIndex, 0, movedGroup);
+                                tabs.vm.list.splice(njDelNew, 0, movedGroup);
                             }
                             // 不再全量重渲染（Sortable 已把 DOM 节点移到正确位置），只同步写死在 DOM 上的序号/计数
-                            syncDragDomOrder("tabGroupsBak", "del_");
+                            syncDragDomOrder("tabGroupsBak", "del_", njBaksPage * NJ_PAGE_SIZE);
                         }
                     });
 
@@ -5461,7 +5755,7 @@ https://www.google.com | Google
 
             {
                 let j;
-                for (j = 0; j < Math.min(del_bridge.length, njBaksRenderLimit); j += 1) {
+                for (j = njBaksPage * NJ_PAGE_SIZE; j < Math.min(del_bridge.length, (njBaksPage + 1) * NJ_PAGE_SIZE); j += 1) {
                     let sortableTab = Sortable.create(document.getElementById("del_tabs_" + j), {
                         group: {
                             name: "tabs", pull: true, put: true
@@ -5487,7 +5781,7 @@ https://www.google.com | Google
                             njDragActive = false;
                             tabs.vm.moveTab(evt.from.parentNode.id, evt.oldIndex, evt.to.parentNode.id, evt.newIndex)
                             // 标签数据数组与 vm.list 里组对象的 tabs 是同一引用，moveTab 已同步；不再全量重渲染，只同步 DOM 上的序号/计数
-                            syncDragDomOrder("tabGroupsBak", "del_");
+                            syncDragDomOrder("tabGroupsBak", "del_", njBaksPage * NJ_PAGE_SIZE);
                         }
                     })
                     sortableDelTabList.push(sortableTab);

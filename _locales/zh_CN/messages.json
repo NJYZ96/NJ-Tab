@@ -1,6 +1,6 @@
 {
 	"pluginDesc": {
-		"message": "浏览器标签管理工具，对标OneTab"
+		"message": "浏览器标签管理工具，对标 OneTab"
 	},
 	"showAllTabs": {
 		"message": "打开后台管理页"
@@ -63,7 +63,7 @@
 		"message": "首页"
 	},
 	"hideShowImportOnetabFunction": {
-		"message": "导入OneTab格式"
+		"message": "导入 OneTab 格式"
 	},
 	"hideShowImportDefaultFunction": {
 		"message": "导入默认格式"
@@ -78,16 +78,16 @@
 		"message": "是否拖曳标签"
 	},
 	"pushToGithubGist": {
-		"message": "推送到GitHub的gist"
+		"message": "推送到 GitHub 的 Gist"
 	},
 	"pullFromGithubGist": {
-		"message": "从GitHub的gist拉取"
+		"message": "从 GitHub 的 Gist 拉取"
 	},
 	"pushToGiteeGist": {
-		"message": "推送到Gitee的gist"
+		"message": "推送到 Gitee 的 Gist"
 	},
 	"pullFromGiteeGist": {
-		"message": "从Gitee的gist拉取"
+		"message": "从 Gitee 的 Gist 拉取"
 	},
 	"confirmKey": {
 		"message": "请输入\"确定\"表示确认："
@@ -141,82 +141,82 @@
 		"message": "否"
 	},
 	"pushToGithubGistIng": {
-		"message": "正在推送到GitHub的gist，请稍等！"
+		"message": "正在推送到 GitHub 的 Gist，请稍等！"
 	},
 	"pullFromGithubGistIng": {
-		"message": "正在从GitHub的gist拉取，请稍等！"
+		"message": "正在从 GitHub 的 Gist 拉取，请稍等！"
 	},
 	"pushToGiteeGistIng": {
-		"message": "正在推送到Gitee的gist，请稍等！"
+		"message": "正在推送到 Gitee 的 Gist，请稍等！"
 	},
 	"pullFromGiteeGistIng": {
-		"message": "正在从Gitee的gist拉取，请稍等！"
+		"message": "正在从 Gitee 的 Gist 拉取，请稍等！"
 	},
 	"startPushToGithubGistTask": {
-		"message": "开始推送到GitHub的gist的任务"
+		"message": "开始推送到 GitHub 的 Gist 的任务"
 	},
 	"startPullFromGithubGistTask": {
-		"message": "开始从GitHub的gist拉取的任务"
+		"message": "开始从 GitHub 的 Gist 拉取的任务"
 	},
 	"startPushToGiteeGistTask": {
-		"message": "开始推送到Gitee的gist的任务"
+		"message": "开始推送到 Gitee 的 Gist 的任务"
 	},
 	"startPullFromGiteeGistTask": {
-		"message": "开始从Gitee的gist拉取的任务"
+		"message": "开始从 Gitee 的 Gist 拉取的任务"
 	},
 	"endPushToGithubGistTask": {
-		"message": "推送到GitHub的gist的任务结束"
+		"message": "推送到 GitHub 的 Gist 的任务结束"
 	},
 	"endPullFromGithubGistTask": {
-		"message": "从GitHub的gist拉取的任务完成"
+		"message": "从 GitHub 的 Gist 拉取的任务完成"
 	},
 	"endPushToGiteeGistTask": {
-		"message": "推送到Gitee的gist的任务结束"
+		"message": "推送到 Gitee 的 Gist 的任务结束"
 	},
 	"endPullFromGiteeGistTask": {
-		"message": "从Gitee的gist拉取的任务完成"
+		"message": "从 Gitee 的 Gist 拉取的任务完成"
 	},
 	"clickPushToGithubGist": {
-		"message": "手动点击推送到GitHub的gist"
+		"message": "手动点击推送到 GitHub 的 Gist"
 	},
 	"autoPushToGithubGist": {
-		"message": "自动推送到GitHub的gist"
+		"message": "自动推送到 GitHub 的 Gist"
 	},
 	"clickPullFromGithubGist": {
-		"message": "手动点击从GitHub的gist拉取"
+		"message": "手动点击从 GitHub 的 Gist 拉取"
 	},
 	"clickPushToGiteeGist": {
-		"message": "手动点击推送到Gitee的gist"
+		"message": "手动点击推送到 Gitee 的 Gist"
 	},
 	"autoPushToGiteeGist": {
-		"message": "自动推送到Gitee的gist"
+		"message": "自动推送到 Gitee 的 Gist"
 	},
 	"clickPullFromGiteeGist": {
-		"message": "手动点击从Gitee的gist拉取"
+		"message": "手动点击从 Gitee 的 Gist 拉取"
 	},
 	"startCheckGithubTokenSaved": {
-		"message": "开始检查GitHub token有没有保存"
+		"message": "开始检查 GitHub token 有没有保存"
 	},
 	"startCheckGiteeTokenSaved": {
-		"message": "开始检查Gitee token有没有保存"
+		"message": "开始检查 Gitee token 有没有保存"
 	},
 	"githubTokenSaved": {
-		"message": "GitHub token有保存"
+		"message": "GitHub token 有保存"
 	},
 	"giteeTokenSaved": {
-		"message": "Gitee token有保存"
+		"message": "Gitee token 有保存"
 	},
 	"githubTokenNoSaved": {
-		"message": "GitHub token没有保存"
+		"message": "GitHub token 没有保存"
 	},
 	"giteeTokenNoSaved": {
-		"message": "Gitee token没有保存"
+		"message": "Gitee token 没有保存"
 	},
 	"saveTokenKey": {
-		"message": "请输入token："
+		"message": "请输入 token："
 	},
 	"saveTokenValue": {
-		"message": "请确保token是正确的！！！"
+		"message": "请确保 token 是正确的！！！"
 	},
 	"githubTokenSaveSuccess": {
 		"message": "GitHub token 保存完毕"
@@ -225,16 +225,16 @@
 		"message": "Gitee token 保存完毕"
 	},
 	"startCheckGistIdSaved": {
-		"message": "开始检查gistId有没有保存"
+		"message": "开始检查 Gist ID 有没有保存"
 	},
 	"gistIdSaved": {
-		"message": "gistId有保存"
+		"message": "Gist ID 有保存"
 	},
 	"gistIdNoSaved": {
-		"message": "gistId没有保存"
+		"message": "Gist ID 没有保存"
 	},
 	"directUpdate": {
-		"message": "已经创建了gist，直接开始更新"
+		"message": "已经创建了 Gist，直接开始更新"
 	},
 	"updateSuccess": {
 		"message": "更新成功"
@@ -243,25 +243,25 @@
 		"message": "更新失败"
 	},
 	"startCheckGistCreated": {
-		"message": "检查是否已经创建了gist"
+		"message": "检查是否已经创建了 Gist"
 	},
 	"gistCreated": {
-		"message": "已经创建了gist"
+		"message": "已经创建了 Gist"
 	},
 	"gistNoCreated": {
-		"message": "还没有创建gist"
+		"message": "还没有创建 Gist"
 	},
 	"getGistIdAndSaved": {
-		"message": "获取gistId并保存完毕"
+		"message": "获取 Gist ID 并保存完毕"
 	},
 	"noGistCreatedAndOver": {
-		"message": "还没有创建gist,没有内容可以拉,结束任务"
+		"message": "还没有创建 Gist，没有内容可以拉，结束任务"
 	},
 	"startCreateGithubGist": {
-		"message": "还没有创建GitHub的gist,开始创建"
+		"message": "还没有创建 GitHub 的 Gist，开始创建"
 	},
 	"startCreateGiteeGist": {
-		"message": "还没有创建Gitee的gist,开始创建"
+		"message": "还没有创建 Gitee 的 Gist，开始创建"
 	},
 	"createSuccess": {
 		"message": "创建成功"
@@ -270,19 +270,19 @@
 		"message": "创建失败"
 	},
 	"getGithubGistById": {
-		"message": "根据GitHub的gistId拉取gist"
+		"message": "根据 GitHub 的 Gist ID 拉取 Gist"
 	},
 	"getGithubGistByRawUrl": {
-		"message": "被截断了，根据raw_url拉取gist"
+		"message": "被截断了，根据 raw_url 拉取 Gist"
 	},
 	"getGiteeGistById": {
-		"message": "根据Gitee的gistId拉取gist"
+		"message": "根据 Gitee 的 Gist ID 拉取 Gist"
 	},
 	"pullSuccess": {
-		"message": "拉取gist成功"
+		"message": "拉取 Gist 成功"
 	},
 	"pullFailed": {
-		"message": "拉取gist失败"
+		"message": "拉取 Gist 失败"
 	},
 	"start": {
 		"message": "开始："
@@ -291,22 +291,22 @@
 		"message": "结束："
 	},
 	"clickPushGithub": {
-		"message": "手动推送到GitHub"
+		"message": "手动推送到 GitHub"
 	},
 	"autoPushGithub": {
-		"message": "自动推送到GitHub"
+		"message": "自动推送到 GitHub"
 	},
 	"clickPullGithub": {
-		"message": "手动从GitHub拉取"
+		"message": "手动从 GitHub 拉取"
 	},
 	"clickPushGitee": {
-		"message": "手动推送到Gitee"
+		"message": "手动推送到 Gitee"
 	},
 	"autoPushGitee": {
-		"message": "自动推送到Gitee"
+		"message": "自动推送到 Gitee"
 	},
 	"clickPullGitee": {
-		"message": "手动从Gitee拉取"
+		"message": "手动从 Gitee 拉取"
 	},
 	"waitForMinutes": {
 		"message": " 秒等待"
@@ -327,7 +327,7 @@
 		"message": "秒"
 	},
 	"sourceCode": {
-		"message": "对本项目的源码有兴趣的话欢迎移步star："
+		"message": "对本项目的源码有兴趣的话欢迎移步 star："
 	},
 	"usedSpace": {
 		"message": "已使用："
@@ -602,6 +602,36 @@
 	"logAction_dataConvert": {
 		"message": "本地数据转换"
 	},
+	"pagerFirst": {
+		"message": "首页"
+	},
+	"pagerPrev": {
+		"message": "上一页"
+	},
+	"pagerNext": {
+		"message": "下一页"
+	},
+	"pagerLast": {
+		"message": "尾页"
+	},
+	"pagerJump": {
+		"message": "跳到第"
+	},
+	"pagerPageUnit": {
+		"message": "页"
+	},
+	"pagerTotal": {
+		"message": "共 $1 页"
+	},
+	"statusTabsLabel": {
+		"message": "条标签"
+	},
+	"statusUsage": {
+		"message": "已使用：$1 MB（$2%）"
+	},
+	"logAction_discardOpen": {
+		"message": "休眠打开"
+	},
 	"navGistBackup": {
 		"message": "Gist 备份"
 	},
@@ -781,6 +811,9 @@
 	},
 	"secretSavedPlaceholder": {
 		"message": "已保存，留空表示不修改"
+	},
+	"secretSavedLast3": {
+		"message": "，末 3 位："
 	},
 	"secretSecurityNote": {
 		"message": "密码与令牌只在本机加密保存，不会明文存放，也不会进入任何备份、导出或 Gist。"

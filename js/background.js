@@ -95,6 +95,17 @@ function njGistAutoInterval(items) {
     return [5, 15, 30, 60, 120].indexOf(v) >= 0 ? v : 30;
 }
 
+// 4.5 需求五：自动备份结果按仓库分开各存一份（Gist 页两仓各显示自己最新一条），旧的合并键继续写、兼容老版本
+function njSetGistAutoResult(provider, result, reason) {
+    let rec = {provider: provider, result: result, time: Date.now()};
+    if (reason) {
+        rec.reason = reason;
+    }
+    let obj = {gistAutoLastResult: rec};
+    obj[provider === "gitee" ? "gistAutoLastResultGitee" : "gistAutoLastResultGithub"] = rec;
+    chrome.storage.local.set(obj);
+}
+
 // ===== 4.2 需求四：统一操作日志 =====
 // 存 chrome.storage.local 的 njLogs 数组：{t: 时间戳, action: 动作, ok: 成功与否, detail: 简短说明}
 // 绝不记密码/令牌原文。自动清理：logAutoCleanEnabled（默认开）、logKeepDays（默认 30 天）、logKeepCount（默认 500 条）
@@ -145,7 +156,7 @@ function njGistAutoMaybePush(provider, content, updateFn) {
             } else {
                 handleGiteeGistLog.push(`${chrome.i18n.getMessage("gistAutoSkippedNoChange")}`);
             }
-            chrome.storage.local.set({gistAutoLastResult: {provider: provider, result: "skipped", time: Date.now()}});
+            njSetGistAutoResult(provider, "skipped");
             njLogEvent("gistAutoBackupSkipped", true, provider);
             // 结束本次任务（上面的秒表监听会收尾并把日志落盘）
             if (provider === "github") {
@@ -546,13 +557,13 @@ function patchGithubGist(files, myHeaders) {
                     chrome.storage.local.set({gistAutoHashGithub: njPendingAutoHash.github});
                     njPendingAutoHash.github = null;
                 }
-                chrome.storage.local.set({gistAutoLastResult: {provider: "github", result: "success", time: Date.now()}});
+                njSetGistAutoResult("github", "success");
                 njLogEvent("gistAutoBackup", true, "GitHub");
             } else {
                 console.log("更新失败")
                 handleGithubGistLog.push(`${chrome.i18n.getMessage("updateFailed")}`)
                 njPendingAutoHash.github = null;
-                chrome.storage.local.set({gistAutoLastResult: {provider: "github", result: "failed", time: Date.now(), reason: "HTTP " + response.status}});
+                njSetGistAutoResult("github", "failed", "HTTP " + response.status);
                 if (response.status === 403 || response.status === 429) {
                     // 被限流必须单独记进日志（4.2 需求三/四）
                     handleGithubGistLog.push(`${chrome.i18n.getMessage("gistRateLimited")} HTTP ${response.status}`)
@@ -566,7 +577,7 @@ function patchGithubGist(files, myHeaders) {
             console.log('error', error)
             handleGithubGistLog.push(`${chrome.i18n.getMessage("updateFailed")}-->${error.toString()}`)
             njPendingAutoHash.github = null;
-            chrome.storage.local.set({gistAutoLastResult: {provider: "github", result: "failed", time: Date.now(), reason: String(error && error.message || error)}});
+            njSetGistAutoResult("github", "failed", String(error && error.message || error));
             njLogEvent("gistAutoBackup", false, "GitHub " + String(error && error.message || error));
         })
         .finally(() => {
@@ -602,13 +613,13 @@ function updateGiteeGist(content) {
                     chrome.storage.local.set({gistAutoHashGitee: njPendingAutoHash.gitee});
                     njPendingAutoHash.gitee = null;
                 }
-                chrome.storage.local.set({gistAutoLastResult: {provider: "gitee", result: "success", time: Date.now()}});
+                njSetGistAutoResult("gitee", "success");
                 njLogEvent("gistAutoBackup", true, "Gitee");
             } else {
                 console.log("更新失败")
                 handleGiteeGistLog.push(`${chrome.i18n.getMessage("updateFailed")}`)
                 njPendingAutoHash.gitee = null;
-                chrome.storage.local.set({gistAutoLastResult: {provider: "gitee", result: "failed", time: Date.now(), reason: "HTTP " + response.status}});
+                njSetGistAutoResult("gitee", "failed", "HTTP " + response.status);
                 if (response.status === 403 || response.status === 429) {
                     handleGiteeGistLog.push(`${chrome.i18n.getMessage("gistRateLimited")} HTTP ${response.status}`)
                     njLogEvent("gistAutoBackupRateLimited", false, "Gitee HTTP " + response.status);
@@ -621,7 +632,7 @@ function updateGiteeGist(content) {
             console.log('error', error)
             handleGiteeGistLog.push(`${chrome.i18n.getMessage("updateFailed")}-->${error.toString()}`)
             njPendingAutoHash.gitee = null;
-            chrome.storage.local.set({gistAutoLastResult: {provider: "gitee", result: "failed", time: Date.now(), reason: String(error && error.message || error)}});
+            njSetGistAutoResult("gitee", "failed", String(error && error.message || error));
             njLogEvent("gistAutoBackup", false, "Gitee " + String(error && error.message || error));
         })
         .finally(() => {
@@ -1243,15 +1254,9 @@ chrome.storage.onChanged.addListener(function (changes, areaName) {
         }
     }
     if (areaName === "local" && flag) {
-        console.log("要同步")
-        chrome.storage.local.get(null, async function (items) {
-            let autoSync = items.autoSync
-            if (autoSync === true) {
-                console.log("autoSync open")
-                // 有storage变化就安全数字+1，因为storage不知道底层是怎么实现的，一个set操作，可能会触发多次onChanged，会变相变成并发操作
-                await add()
-            }
-        });
+        // 4.5 需求六：取消「修改后自动同步」——数据变化不再触发推送；
+        // 自动备份只按 Gist 页设定的频率，由闹钟 checkAutoSyncGithub/checkAutoSyncGitee 定时执行。
+        console.log("数据有变化（不再触发自动同步，等定时自动备份）")
     } else {
         console.log("不要同步")
     }

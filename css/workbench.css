@@ -917,11 +917,46 @@ html[data-theme="dark"] .nj-theme-btn:hover, html[data-theme="dark"] .nj-theme-b
    状态文字（总数/已使用）用自动左边距顶到右侧，状态文字变宽变窄只动它自己，不再挤动查看日志 */
 .nj-menu-row2 {
     justify-content: flex-start;
+    position: relative;
 }
-.nj-menu-row2 #totals {
-    margin-left: auto;
+/* 4.5 修正：状态组绝对定位到第二行右侧，不再参与菜单块的宽度计算——
+   免得状态文字变长（需求十一新格式）把菜单块撑宽、让「查看日志」的位置在各页之间漂移（4.4.1 审查问题一） */
+/* 4.5.1 修复：状态组只是展示文字、不接收鼠标事件——绝对定位的它横跨第二行右半段时，
+   不再压住同行的「配置 / 查看日志」链接（用户实测两菜单点不动、悬停还弹出状态的 title） */
+.nj-menu-row2 .nj-status-group {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    white-space: nowrap;
+    pointer-events: none;
 }
 .nj-menu .nj-theme-btn {
     padding: 2px;
     color: var(--muted-text-color);
+}
+
+/* 4.5 需求十二：搜索框提示文字字号随窗口宽度自适应，窗口窄时自动变小、尽量把整句提示显示全 */
+#searchInput::placeholder {
+    font-size: clamp(11px, 2.6vw, 15px);
+}
+
+/* 4.5 需求十四：正式分页条 */
+.nj-pager {
+    margin: 14px 0 6px;
+    text-align: center;
+}
+.nj-pager .btn {
+    margin: 0 2px;
+}
+.nj-pager-jump {
+    margin-left: 10px;
+    white-space: nowrap;
+}
+.nj-pager-input {
+    display: inline-block !important;
+    width: 64px !important;
+    margin: 0 4px;
+    text-align: center;
+    vertical-align: middle;
 }

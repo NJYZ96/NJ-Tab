@@ -78,16 +78,16 @@
 		"message": "Super Drag Tabs"
 	},
 	"pushToGithubGist": {
-		"message": "Push To GitHub's gist"
+		"message": "Push To GitHub's Gist"
 	},
 	"pullFromGithubGist": {
-		"message": "Pull From GitHub's gist"
+		"message": "Pull From GitHub's Gist"
 	},
 	"pushToGiteeGist": {
-		"message": "Push To Gitee's gist"
+		"message": "Push To Gitee's Gist"
 	},
 	"pullFromGiteeGist": {
-		"message": "Pull From Gitee's gist"
+		"message": "Pull From Gitee's Gist"
 	},
 	"confirmKey": {
 		"message": "Please input \"confirm\" to ensure: "
@@ -153,46 +153,46 @@
 		"message": "pull from Gitee's Gist ing, please wait!"
 	},
 	"startPushToGithubGistTask": {
-		"message": "start push to GitHub's gist task"
+		"message": "start push to GitHub's Gist task"
 	},
 	"startPullFromGithubGistTask": {
-		"message": "start pull from GitHub's gist task"
+		"message": "start pull from GitHub's Gist task"
 	},
 	"startPushToGiteeGistTask": {
-		"message": "start push to Gitee's gist task"
+		"message": "start push to Gitee's Gist task"
 	},
 	"startPullFromGiteeGistTask": {
-		"message": "start pull from Gitee's gist task"
+		"message": "start pull from Gitee's Gist task"
 	},
 	"endPushToGithubGistTask": {
-		"message": "push to GitHub's gist task end"
+		"message": "push to GitHub's Gist task end"
 	},
 	"endPullFromGithubGistTask": {
-		"message": "pull from GitHub's gist task end"
+		"message": "pull from GitHub's Gist task end"
 	},
 	"endPushToGiteeGistTask": {
-		"message": "push to Gitee's gist task end"
+		"message": "push to Gitee's Gist task end"
 	},
 	"endPullFromGiteeGistTask": {
-		"message": "pull from Gitee's gist task end"
+		"message": "pull from Gitee's Gist task end"
 	},
 	"clickPushToGithubGist": {
-		"message": "click push to GitHub's gist"
+		"message": "click push to GitHub's Gist"
 	},
 	"autoPushToGithubGist": {
-		"message": "auto push to GitHub's gist"
+		"message": "auto push to GitHub's Gist"
 	},
 	"clickPullFromGithubGist": {
-		"message": "click pull from GitHub's gist"
+		"message": "click pull from GitHub's Gist"
 	},
 	"clickPushToGiteeGist": {
-		"message": "click push to Gitee's gist"
+		"message": "click push to Gitee's Gist"
 	},
 	"autoPushToGiteeGist": {
-		"message": "auto push to Gitee's gist"
+		"message": "auto push to Gitee's Gist"
 	},
 	"clickPullFromGiteeGist": {
-		"message": "click pull from Gitee's gist"
+		"message": "click pull from Gitee's Gist"
 	},
 	"startCheckGithubTokenSaved": {
 		"message": "start check GitHub token is saved ?"
@@ -225,16 +225,16 @@
 		"message": "Gitee token save success!"
 	},
 	"startCheckGistIdSaved": {
-		"message": "start check gistId is saved ?"
+		"message": "start check Gist ID is saved ?"
 	},
 	"gistIdSaved": {
-		"message": "gistId had saved"
+		"message": "Gist ID had saved"
 	},
 	"gistIdNoSaved": {
-		"message": "gistId had not saved"
+		"message": "Gist ID had not saved"
 	},
 	"directUpdate": {
-		"message": "gist had been created, direct update."
+		"message": "Gist had been created, direct update."
 	},
 	"updateSuccess": {
 		"message": "update success"
@@ -243,25 +243,25 @@
 		"message": "update failed!"
 	},
 	"startCheckGistCreated": {
-		"message": "start check gist is created ?"
+		"message": "start check Gist is created ?"
 	},
 	"gistCreated": {
-		"message": "gist had created"
+		"message": "Gist had created"
 	},
 	"gistNoCreated": {
-		"message": "gist had not created"
+		"message": "Gist had not created"
 	},
 	"getGistIdAndSaved": {
-		"message": "get gistId and saved success"
+		"message": "get Gist ID and saved success"
 	},
 	"noGistCreatedAndOver": {
-		"message": "had not created gist, nothing can pull, it's over!"
+		"message": "had not created Gist, nothing can pull, it's over!"
 	},
 	"startCreateGithubGist": {
-		"message": "had not created gist, start create GitHub gist now!"
+		"message": "had not created Gist, start create GitHub Gist now!"
 	},
 	"startCreateGiteeGist": {
-		"message": "had not created gist, start create Gitee gist now!"
+		"message": "had not created Gist, start create Gitee Gist now!"
 	},
 	"createSuccess": {
 		"message": " create success"
@@ -270,19 +270,19 @@
 		"message": "create failed"
 	},
 	"getGithubGistById": {
-		"message": "get GitHub's gist by gistId"
+		"message": "get GitHub's Gist by Gist ID"
 	},
 	"getGithubGistByRawUrl": {
-		"message": "be truncated, get GitHub's gist by raw_url"
+		"message": "be truncated, get GitHub's Gist by raw_url"
 	},
 	"getGiteeGistById": {
-		"message": "get Gitee's gist by gistId"
+		"message": "get Gitee's Gist by Gist ID"
 	},
 	"pullSuccess": {
-		"message": "pull gist success"
+		"message": "pull Gist success"
 	},
 	"pullFailed": {
-		"message": "pull gist failed"
+		"message": "pull Gist failed"
 	},
 	"start": {
 		"message": "start: "
@@ -602,6 +602,36 @@
 	"logAction_dataConvert": {
 		"message": "Local data conversion"
 	},
+	"pagerFirst": {
+		"message": "First"
+	},
+	"pagerPrev": {
+		"message": "Previous"
+	},
+	"pagerNext": {
+		"message": "Next"
+	},
+	"pagerLast": {
+		"message": "Last"
+	},
+	"pagerJump": {
+		"message": "Go to page"
+	},
+	"pagerPageUnit": {
+		"message": ""
+	},
+	"pagerTotal": {
+		"message": "$1 pages in total"
+	},
+	"statusTabsLabel": {
+		"message": " tabs"
+	},
+	"statusUsage": {
+		"message": "Used: $1 MB ($2%)"
+	},
+	"logAction_discardOpen": {
+		"message": "Open with discarded tabs"
+	},
 	"navGistBackup": {
 		"message": "Gist backup"
 	},
@@ -781,6 +811,9 @@
 	},
 	"secretSavedPlaceholder": {
 		"message": "Saved. Leave blank to keep unchanged"
+	},
+	"secretSavedLast3": {
+		"message": ", last 3: "
 	},
 	"secretSecurityNote": {
 		"message": "Passwords and tokens are stored encrypted on this device only, never in plaintext, and never included in any backup, export or Gist."
