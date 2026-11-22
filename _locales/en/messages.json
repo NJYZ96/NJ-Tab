@@ -66,10 +66,10 @@
 		"message": "Import OneTab Mode"
 	},
 	"hideShowImportDefaultFunction": {
-		"message": "Import Default Mode"
+		"message": "Import default text format"
 	},
 	"hideShowExportFunction": {
-		"message": "Export"
+		"message": "Export default text format"
 	},
 	"dragTitle": {
 		"message": "Super Drag Title"
@@ -99,7 +99,7 @@
 		"message": "import to local"
 	},
 	"exportToLocal": {
-		"message": "export to local"
+		"message": "Export default text format"
 	},
 	"importWarn": {
 		"message": "Format as in the example above: a blank line separates groups; each line is \"URL | Title\" (spaces around the |)."
@@ -291,22 +291,22 @@
 		"message": "end: "
 	},
 	"clickPushGithub": {
-		"message": "CLICK TO PUSH TO GitHub'S GIST"
+		"message": "GitHub manual push"
 	},
 	"autoPushGithub": {
-		"message": "AUTO PUSH TO GitHub'S GIST"
+		"message": "GitHub auto push"
 	},
 	"clickPullGithub": {
-		"message": "CLICK TO PULL FROM GitHub'S GIST"
+		"message": "GitHub manual pull"
 	},
 	"clickPushGitee": {
-		"message": "CLICK TO PUSH TO Gitee'S GIST"
+		"message": "Gitee manual push"
 	},
 	"autoPushGitee": {
-		"message": "AUTO PUSH TO Gitee'S GIST"
+		"message": "Gitee auto push"
 	},
 	"clickPullGitee": {
-		"message": "CLICK TO PULL FROM Gitee'S GIST"
+		"message": "Gitee manual pull"
 	},
 	"waitForMinutes": {
 		"message": "minute wait for"
@@ -507,19 +507,25 @@
 		"message": "The web page file opens directly in a browser; the full backup contains everything and can restore your data."
 	},
 	"importBackupFile": {
-		"message": "Import from backup file"
+		"message": "Import full backup"
+	},
+	"importConfirmBtn": {
+		"message": "Confirm import"
+	},
+	"importConfirmFirst": {
+		"message": "Import this backup file? It will overwrite all current tabs and recycle bin contents."
 	},
 	"importBackupTip": {
-		"message": "Choose a .json file saved earlier with \"Export full backup\". Importing appends and merges: existing tabs are not overwritten, and collection times are kept as they are."
+		"message": "Pick a .json file saved by Export full backup. Importing overwrites everything; timestamps and other info are kept as-is."
 	},
 	"backupInvalid": {
 		"message": "This backup file is not in the right format, and nothing was imported. Please make sure it is a file created by this extension's Export full backup."
 	},
 	"backupImportConfirm": {
-		"message": "Import this backup? Its tabs will be appended after your existing tabs and will not overwrite any existing data."
+		"message": "Importing will overwrite all local settings, tabs and recycle bin contents with this backup file.<br>All current local content (excluding sensitive information such as passwords and tokens) will be replaced. Import now?"
 	},
 	"backupImportSuccess": {
-		"message": "Import finished, the page will reload."
+		"message": "Import succeeded."
 	},
 	"backupImportSkipped": {
 		"message": " problem item(s) will be skipped (see the operation log for details)"
@@ -555,31 +561,31 @@
 		"message": "No entries yet."
 	},
 	"logAction_gistPush": {
-		"message": "Gist push"
+		"message": "Gist manual push"
 	},
 	"logAction_gistPull": {
-		"message": "Gist pull"
+		"message": "Gist manual pull"
 	},
 	"logAction_gistAutoBackup": {
-		"message": "Gist auto backup"
+		"message": "Gist auto push"
 	},
 	"logAction_gistAutoBackupSkipped": {
-		"message": "Gist auto backup skipped (no changes)"
+		"message": "Gist auto push"
 	},
 	"logAction_gistRateLimited": {
-		"message": "Gist backup rate limited"
+		"message": "Gist manual push"
 	},
 	"logAction_gistAutoBackupRateLimited": {
-		"message": "Gist auto backup rate limited"
+		"message": "Gist auto push"
 	},
 	"logAction_webdavUpload": {
-		"message": "WebDAV upload backup"
+		"message": "WebDAV manual backup"
 	},
 	"logAction_webdavRestore": {
 		"message": "WebDAV restore"
 	},
 	"logAction_webdavForceBackup": {
-		"message": "Forced backup before restore"
+		"message": "WebDAV forced backup before restore"
 	},
 	"logAction_webdavAutoBackup": {
 		"message": "WebDAV auto backup"
@@ -588,13 +594,13 @@
 		"message": "WebDAV old version cleanup"
 	},
 	"logAction_exportBackup": {
-		"message": "Export backup file"
+		"message": "Export full backup"
 	},
 	"logAction_exportPage": {
-		"message": "Export web page file"
+		"message": "Export as web page file"
 	},
 	"logAction_importBackup": {
-		"message": "Import backup"
+		"message": "Import full backup"
 	},
 	"logAction_trashAutoClean": {
 		"message": "Trash auto cleanup"
@@ -629,11 +635,8 @@
 	"statusUsage": {
 		"message": "Used: $1 MB ($2%)"
 	},
-	"logAction_discardOpen": {
-		"message": "Open with discarded tabs"
-	},
 	"navGistBackup": {
-		"message": "Gist backup"
+		"message": "Gist"
 	},
 	"navWebdav": {
 		"message": "WebDAV"
@@ -657,13 +660,13 @@
 		"message": "Auto backup status"
 	},
 	"gistAutoStatusSuccess": {
-		"message": "Last auto backup succeeded"
+		"message": "Auto backup succeeded"
 	},
 	"gistAutoStatusSkipped": {
-		"message": "Last auto backup skipped: no changes"
+		"message": "Auto backup skipped: no changes"
 	},
 	"gistAutoStatusFailed": {
-		"message": "Last auto backup failed"
+		"message": "Auto backup failed"
 	},
 	"gistAutoStatusNone": {
 		"message": "No auto backup yet"
@@ -738,16 +741,16 @@
 		"message": "Upload failed, and your local data was not changed. Please check the server address, username, password and network, then try again. Details:"
 	},
 	"webdavRestoreConfirm": {
-		"message": "Restoring will replace all your current tabs and recycle bin contents with the backup on WebDAV. Before replacing, your current data will automatically be saved as a snapshot on this computer, so you can get it back if anything goes wrong. Are you sure you want to restore?"
+		"message": "Restoring will overwrite all local settings, tabs and recycle bin contents with the selected backup version in the remote WebDAV.<br>All current local content (excluding sensitive information such as passwords and tokens) will be replaced. Restore now?"
 	},
 	"webdavRestoreSuccess": {
-		"message": "Restore finished, the page will reload."
+		"message": "Restore finished."
 	},
 	"webdavRestoreFailed": {
 		"message": "Restore failed, and your current local data was not changed. Details:"
 	},
 	"searchPlaceholder": {
-		"message": "Search: type and press Enter (title, URL or group name)"
+		"message": "Search"
 	},
 	"searchResults": {
 		"message": "Found: "
@@ -768,7 +771,7 @@
 		"message": " (in Trash)"
 	},
 	"importWarnDefault": {
-		"message": "Format as in the example above: the first line is \"Group name | Locked | Pinned\", then one \"URL | Title | Added time\" per line."
+		"message": "Format as in the example above: the first line is \"Group name | Locked | Pinned | Note\", then one \"URL | Title | Added time\" per line. The note segment is optional."
 	},
 	"importDedupHint": {
 		"message": "Dedup: a tab whose URL and title are both the same as an existing tab is skipped (across groups too); the main list and the trash are compared separately."
@@ -781,12 +784,6 @@
 	},
 	"groupNote": {
 		"message": "Note"
-	},
-	"restoreDiscarded": {
-		"message": "Open restored tab groups discarded (they only load when clicked, saves memory)"
-	},
-	"restoreDiscardedEnable": {
-		"message": "Enable"
 	},
 	"njCancel": {
 		"message": "Cancel"
@@ -801,19 +798,13 @@
 		"message": "Final confirmation: type the letter Y to enable the confirm button."
 	},
 	"gistPushOverwriteWarn": {
-		"message": "Pushing will overwrite the backup in the remote Gist with all your local data. The current remote backup will be replaced. Continue?"
+		"message": "Pushing will overwrite the backup in the remote Gist with all your local data.<br>The current remote backup will be replaced. Continue?"
 	},
 	"gistPullOverwriteWarn": {
-		"message": "Pulling will overwrite all local tabs and recycle bin contents with the backup in the remote Gist. Your current local data will be replaced. Continue?"
+		"message": "Pulling will overwrite all local settings, tabs and recycle bin contents with the backup in the remote Gist.<br>All current local content (excluding sensitive information such as passwords and tokens) will be replaced. Pull now?"
 	},
 	"njSave": {
 		"message": "Save"
-	},
-	"secretSavedPlaceholder": {
-		"message": "Saved. Leave blank to keep unchanged"
-	},
-	"secretSavedLast3": {
-		"message": ", last 3: "
 	},
 	"secretSecurityNote": {
 		"message": "Passwords and tokens are stored encrypted on this device only, never in plaintext, and never included in any backup, export or Gist."
@@ -851,8 +842,26 @@
 	"webdavNewerWarnSuffix": {
 		"message": "), which is newer than the current plugin. Please confirm carefully before restoring."
 	},
+	"logAction_gistPushGithub": {
+		"message": "GitHub manual push"
+	},
+	"logAction_gistPushGitee": {
+		"message": "Gitee manual push"
+	},
+	"logAction_gistPullGithub": {
+		"message": "GitHub manual pull"
+	},
+	"logAction_gistPullGitee": {
+		"message": "Gitee manual pull"
+	},
+	"logAction_gistAutoGithub": {
+		"message": "GitHub auto push"
+	},
+	"logAction_gistAutoGitee": {
+		"message": "Gitee auto push"
+	},
 	"logSectionGist": {
-		"message": "Gist Backup"
+		"message": "Gist"
 	},
 	"logSectionWebdav": {
 		"message": "WebDAV"
@@ -875,7 +884,55 @@
 	"gistOldReadOnly": {
 		"message": "The saved ID belongs to a legacy (3.1) Gist, which is read-only; push will use the new NJ-Tab Gist"
 	},
-	"discardedThresholdText": {
-		"message": "Sleep threshold: when a group has more tabs than this, the first ones open directly and the rest are slept"
+	"njResultSuccess": {
+		"message": "Success"
+	},
+	"njResultFailed": {
+		"message": "Failed"
+	},
+	"njResultTimeout": {
+		"message": "Timed out, no result within 30 seconds"
+	},
+	"njResultCanceled": {
+		"message": "Canceled"
+	},
+	"webdavNoBackupYet": {
+		"message": "There is no backup on the server yet."
+	},
+	"webdavDeleteAll": {
+		"message": "Delete all backups"
+	},
+	"webdavDeleteAllConfirm": {
+		"message": "Delete ALL backups on the server? This cannot be undone."
+	},
+	"webdavDeleteAllDone": {
+		"message": "All backups deleted"
+	},
+	"njExportFilesTitle": {
+		"message": "Export files"
+	},
+	"goToBottom": {
+		"message": "Go to bottom"
+	},
+	"autoPushSkipNoToken": {
+		"message": "Skipped: no token saved, nothing was pushed."
+	},
+	"logSkipped": {
+		"message": "Skipped"
+	},
+	"logCanceled": {
+		"message": "Canceled"
+	},
+	"repoTokenLabel": {
+		"message": "Repo Token"
+	},
+	"pushToGistShort": {
+		"message": "Push to Gist"
+	},
+	"pullFromGistShort": {
+		"message": "Pull from Gist"
+	},
+	"gistAutoStatusSkippedPrefix": {
+		"message": "Auto backup skipped"
 	}
 }

@@ -77,6 +77,35 @@ hr {
     z-index: 99;
 }
 
+/* 4.6.4 需求四：右下角上下双箭头圆形按钮 */
+.nj-scroll-btns {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 99;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.nj-scroll-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: none;
+    background: #337ab7;
+    color: #fff;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.nj-scroll-btn:hover, .nj-scroll-btn:focus {
+    background: #286090;
+    outline: none;
+}
+
 .group-amount {
     font-size: 120%;
 }
@@ -305,7 +334,7 @@ ul {
     font-size: 70%;
     font-weight: bold;
     background: var(--chip-bg);
-    color: white;
+    color: var(--text-color);
     display: inline-block;
     border-radius: 1em;
     padding: 0 .3em;
@@ -383,7 +412,7 @@ ul {
 }
 
 .group-title-input {
-    width: 75px;
+    width: 150px; /* 4.6.4.1 审查修复：原 75px 太窄，长组名编辑时截断 */
     overflow: hidden;
     border: none;
     margin-right: 5px;
@@ -738,6 +767,13 @@ html[data-theme="dark"] .nj-theme-btn:hover, html[data-theme="dark"] .nj-theme-b
     line-height: 1.2;
 }
 
+.nj-brand-row2 {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 2px;
+}
+
 .nj-version {
     font-size: 11px;
     color: var(--muted-text-color);
@@ -781,7 +817,7 @@ html[data-theme="dark"] .nj-theme-btn:hover, html[data-theme="dark"] .nj-theme-b
     font-size: 70%;
     font-weight: bold;
     background: var(--chip-bg);
-    color: white;
+    color: var(--text-color);
     display: inline-block;
     border-radius: 1em;
     padding: 0 .3em;
@@ -837,7 +873,7 @@ html[data-theme="dark"] .nj-theme-btn:hover, html[data-theme="dark"] .nj-theme-b
 /* 4.4 需求十二：安全提示两行（每句话一行） */
 .nj-secret-note {
     margin: 0 0 10px;
-    color: #888;
+    color: var(--muted-text-color);
     font-size: 12px;
 }
 .nj-secret-note span {
@@ -861,7 +897,8 @@ html[data-theme="dark"] .nj-theme-btn:hover, html[data-theme="dark"] .nj-theme-b
 /* 4.4 需求十三：WebDAV 表单自适应网格——标签列按最长标签对齐、单行不挤压，输入列自适应 */
 .nj-dav-grid {
     display: grid;
-    grid-template-columns: max-content minmax(220px, 520px);
+    /* 4.6.4 需求六：名称列收窄固定宽，所有输入框左边缘一条线对齐 */
+    grid-template-columns: 190px minmax(220px, 560px);
     column-gap: 12px;
     row-gap: 10px;
     align-items: center;
@@ -902,8 +939,8 @@ html[data-theme="dark"] .nj-theme-btn:hover, html[data-theme="dark"] .nj-theme-b
     display: flex;
     align-items: center;
     gap: 14px;
-    /* 4.3 需求十一：两行等宽、两端对齐、行内均匀分布（成行成列） */
-    justify-content: space-between;
+    /* 4.6.4 需求二：菜单收成一行（首页、回收站、Gist、WebDAV、导入/导出、配置、日志、主题图标），左对齐固定间距 */
+    justify-content: flex-start;
     width: 100%;
 }
 .nj-menu a {
@@ -924,10 +961,9 @@ html[data-theme="dark"] .nj-theme-btn:hover, html[data-theme="dark"] .nj-theme-b
 /* 4.5.1 修复：状态组只是展示文字、不接收鼠标事件——绝对定位的它横跨第二行右半段时，
    不再压住同行的「配置 / 查看日志」链接（用户实测两菜单点不动、悬停还弹出状态的 title） */
 .nj-menu-row2 .nj-status-group {
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
+    /* 4.6.4 需求二：状态信息独占第二行，左边缘与第一行「首页」对齐（不再跟在配置后面） */
+    position: static;
+    margin-left: 0;
     white-space: nowrap;
     pointer-events: none;
 }
@@ -936,10 +972,7 @@ html[data-theme="dark"] .nj-theme-btn:hover, html[data-theme="dark"] .nj-theme-b
     color: var(--muted-text-color);
 }
 
-/* 4.5 需求十二：搜索框提示文字字号随窗口宽度自适应，窗口窄时自动变小、尽量把整句提示显示全 */
-#searchInput::placeholder {
-    font-size: clamp(11px, 2.6vw, 15px);
-}
+/* 4.6 需求十二改版：提示文字只留「搜索框」3 个字，不再做字号自适应（原 4.5 自适应规则已删） */
 
 /* 4.5 需求十四：正式分页条 */
 .nj-pager {
@@ -959,4 +992,84 @@ html[data-theme="dark"] .nj-theme-btn:hover, html[data-theme="dark"] .nj-theme-b
     margin: 0 4px;
     text-align: center;
     vertical-align: middle;
+}
+
+/* 4.6 需求十四改版：当前页高亮——用主题链接色做底、白字加粗，暗黑模式下也一眼能认出当前页 */
+/* 4.6.1：令牌完整提示文字行（输入框里显示不全时看这一行） */
+/* 4.6.4 需求七：Gist 页令牌行——输入框后面跟自己的推送/拉取按钮，4 个按钮等宽等高 */
+.nj-token-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.nj-token-row .control-label {
+    flex: none;
+    text-align: left;
+    padding: 0;
+    margin: 0;
+    white-space: nowrap;
+}
+
+/* 抬头两端对齐：仓库名占固定宽格子（英文单词不拆），差的宽度留在英文与中文之间的空里 */
+.nj-repo-name {
+    display: inline-block;
+    width: 56px;
+}
+
+.nj-token-cell {
+    width: 300px;
+    flex: none;
+}
+
+.nj-token-cell .form-control {
+    width: 100%;
+}
+
+.nj-gist-act {
+    width: 118px;
+    flex: none;
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* 自动备份状态跟在拉取按钮后面同一行，不带「自动备份状态」字样 */
+.nj-auto-status {
+    color: var(--muted-text-color);
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.nj-note-indent {
+    margin-left: 158px;
+}
+
+/* 4.6.4 需求六：WebDAV 三个按钮同一行，结果提示在下一行 */
+.nj-dav-btns {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 5px;
+}
+
+.nj-token-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    opacity: 0.75;
+    word-break: break-all;
+}
+
+.nj-pager .btn.active {
+    background-color: var(--link-color) !important;
+    border-color: var(--link-color) !important;
+    color: #ffffff !important;
+    font-weight: bold;
+    box-shadow: 0 0 0 2px var(--link-color);
+    cursor: default;
+}
+
+/* 4.6.4.1 审查修复：暗黑下当前页码浅蓝底白字对比不足，改深色字 */
+html[data-theme="dark"] .nj-pager .btn.active {
+    color: #111111 !important;
 }

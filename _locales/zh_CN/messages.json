@@ -66,10 +66,10 @@
 		"message": "导入 OneTab 格式"
 	},
 	"hideShowImportDefaultFunction": {
-		"message": "导入默认格式"
+		"message": "导入默认文本格式"
 	},
 	"hideShowExportFunction": {
-		"message": "导出"
+		"message": "导出默认文本格式"
 	},
 	"dragTitle": {
 		"message": "是否拖曳标签组"
@@ -99,7 +99,7 @@
 		"message": "导入"
 	},
 	"exportToLocal": {
-		"message": "导出"
+		"message": "导出默认文本格式"
 	},
 	"importWarn": {
 		"message": "格式照上方例子：空行表示分组，每行是「网址 | 标题」（| 两边有空格）。"
@@ -291,22 +291,22 @@
 		"message": "结束："
 	},
 	"clickPushGithub": {
-		"message": "手动推送到 GitHub"
+		"message": "GitHub 手动推送"
 	},
 	"autoPushGithub": {
-		"message": "自动推送到 GitHub"
+		"message": "GitHub 自动推送"
 	},
 	"clickPullGithub": {
-		"message": "手动从 GitHub 拉取"
+		"message": "GitHub 手动拉取"
 	},
 	"clickPushGitee": {
-		"message": "手动推送到 Gitee"
+		"message": "Gitee 手动推送"
 	},
 	"autoPushGitee": {
-		"message": "自动推送到 Gitee"
+		"message": "Gitee 自动推送"
 	},
 	"clickPullGitee": {
-		"message": "手动从 Gitee 拉取"
+		"message": "Gitee 手动拉取"
 	},
 	"waitForMinutes": {
 		"message": " 秒等待"
@@ -342,7 +342,7 @@
 		"message": "还没有收藏！"
 	},
 	"showLog": {
-		"message": "查看日志"
+		"message": "日志"
 	},
 	"secondWait": {
 		"message": "秒等待"
@@ -507,19 +507,25 @@
 		"message": "网页文件可双击打开查看、点链接；完整备份包含全部数据，可用于恢复。"
 	},
 	"importBackupFile": {
-		"message": "从备份文件导入"
+		"message": "导入完整备份"
+	},
+	"importConfirmBtn": {
+		"message": "确认导入"
+	},
+	"importConfirmFirst": {
+		"message": "确定要导入选好的这个备份文件吗？导入会整份覆盖现有全部标签和回收站内容。"
 	},
 	"importBackupTip": {
-		"message": "选之前用「导出完整备份」存的 .json 文件；导入是追加合并，不覆盖现有标签，收集时间等信息原样保留。"
+		"message": "选之前用「导出完整备份」存的 .json 文件；导入是整份覆盖，会替换现有全部标签和回收站，收集时间等信息原样保留。"
 	},
 	"backupInvalid": {
 		"message": "这个备份文件格式不正确，没有导入任何数据。请确认选的是本插件“导出完整备份”生成的文件。"
 	},
 	"backupImportConfirm": {
-		"message": "确定要导入这个备份吗？备份里的标签会追加到现有标签后面，不会覆盖现有数据。"
+		"message": "导入会用这个备份文件，覆盖本地的所有配置、全部标签和回收站内容。<br>本地现在的所有内容（不包含密码令牌等敏感信息）将被替换，确定要导入吗？"
 	},
 	"backupImportSuccess": {
-		"message": "导入完成，页面将刷新。"
+		"message": "导入成功。"
 	},
 	"backupImportSkipped": {
 		"message": "条问题数据会被跳过（详情见操作日志）"
@@ -555,31 +561,31 @@
 		"message": "还没有记录。"
 	},
 	"logAction_gistPush": {
-		"message": "Gist 推送"
+		"message": "Gist 手动推送"
 	},
 	"logAction_gistPull": {
-		"message": "Gist 拉取"
+		"message": "Gist 手动拉取"
 	},
 	"logAction_gistAutoBackup": {
-		"message": "Gist 自动备份"
+		"message": "Gist 自动推送"
 	},
 	"logAction_gistAutoBackupSkipped": {
-		"message": "Gist 自动备份跳过（无变化）"
+		"message": "Gist 自动推送"
 	},
 	"logAction_gistRateLimited": {
-		"message": "Gist 备份被限流"
+		"message": "Gist 手动推送"
 	},
 	"logAction_gistAutoBackupRateLimited": {
-		"message": "Gist 自动备份被限流"
+		"message": "Gist 自动推送"
 	},
 	"logAction_webdavUpload": {
-		"message": "WebDAV 上传备份"
+		"message": "WebDAV 手动备份"
 	},
 	"logAction_webdavRestore": {
 		"message": "WebDAV 恢复"
 	},
 	"logAction_webdavForceBackup": {
-		"message": "恢复前强制备份"
+		"message": "WebDAV 恢复前强制备份"
 	},
 	"logAction_webdavAutoBackup": {
 		"message": "WebDAV 自动备份"
@@ -588,13 +594,13 @@
 		"message": "WebDAV 旧版本清理"
 	},
 	"logAction_exportBackup": {
-		"message": "导出备份文件"
+		"message": "导出完整备份"
 	},
 	"logAction_exportPage": {
-		"message": "导出网页文件"
+		"message": "导出为网页文件"
 	},
 	"logAction_importBackup": {
-		"message": "导入备份"
+		"message": "导入完整备份"
 	},
 	"logAction_trashAutoClean": {
 		"message": "回收站自动清理"
@@ -629,17 +635,14 @@
 	"statusUsage": {
 		"message": "已使用：$1 MB（$2%）"
 	},
-	"logAction_discardOpen": {
-		"message": "休眠打开"
-	},
 	"navGistBackup": {
-		"message": "Gist 备份"
+		"message": "Gist"
 	},
 	"navWebdav": {
 		"message": "WebDAV"
 	},
 	"importExport": {
-		"message": "导入/导出"
+		"message": "导入 / 导出"
 	},
 	"gistAutoBackupTitle": {
 		"message": "Gist 自动备份"
@@ -657,13 +660,13 @@
 		"message": "自动备份状态"
 	},
 	"gistAutoStatusSuccess": {
-		"message": "上次自动备份成功"
+		"message": "自动备份成功"
 	},
 	"gistAutoStatusSkipped": {
-		"message": "上次自动备份跳过：数据无变化"
+		"message": "自动备份跳过：数据无变化"
 	},
 	"gistAutoStatusFailed": {
-		"message": "上次自动备份失败"
+		"message": "自动备份失败"
 	},
 	"gistAutoStatusNone": {
 		"message": "还没有自动备份记录"
@@ -738,16 +741,16 @@
 		"message": "上传失败，本地数据没有变化。请检查服务器地址、账号密码和网络后再试。详情："
 	},
 	"webdavRestoreConfirm": {
-		"message": "恢复会用 WebDAV 上的备份替换现在的全部标签和回收站内容。恢复前会自动把现在的数据在本机存一份快照，万一恢复错了还能找回。确定要恢复吗？"
+		"message": "恢复会用远端 WebDAV 上所选版本的备份，覆盖本地的所有配置、全部标签和回收站内容。<br>本地现在的所有内容（不包含密码令牌等敏感信息）将被替换，确定要恢复吗？"
 	},
 	"webdavRestoreSuccess": {
-		"message": "恢复完成，页面将刷新。"
+		"message": "恢复完成。"
 	},
 	"webdavRestoreFailed": {
 		"message": "恢复失败，现在的本地数据没有被改动。详情："
 	},
 	"searchPlaceholder": {
-		"message": "搜索：输入后按回车（标题、网址或组名）"
+		"message": "搜索框"
 	},
 	"searchResults": {
 		"message": "找到："
@@ -768,7 +771,7 @@
 		"message": "（回收站内）"
 	},
 	"importWarnDefault": {
-		"message": "格式照上方例子：第一行是「组名 | 锁定 | 置顶」，下面每行是「网址 | 标题 | 添加时间」。"
+		"message": "格式照上方例子：第一行是「组名 | 锁定 | 置顶 | 备注」，下面每行是「网址 | 标题 | 添加时间」。备注没有可以不写。"
 	},
 	"importDedupHint": {
 		"message": "去重：网址和标题都与已有标签相同的会跳过、不重复导入（跨组也算）；主列表与回收站分别比对。"
@@ -781,12 +784,6 @@
 	},
 	"groupNote": {
 		"message": "备注"
-	},
-	"restoreDiscarded": {
-		"message": "恢复一组标签时先休眠打开（点开才加载，省内存）"
-	},
-	"restoreDiscardedEnable": {
-		"message": "启用"
 	},
 	"njCancel": {
 		"message": "取消"
@@ -801,19 +798,13 @@
 		"message": "这是最后确认：请输入字母 Y，确认按钮才会生效。"
 	},
 	"gistPushOverwriteWarn": {
-		"message": "推送会用本地的全部数据，覆盖远端 Gist 上的备份。远端现在的备份内容将被替换，确定要推送吗？"
+		"message": "推送会用本地的全部数据，覆盖远端 Gist 上的备份。<br>远端现在的备份内容将被替换，确定要推送吗？"
 	},
 	"gistPullOverwriteWarn": {
-		"message": "拉取会用远端 Gist 上的备份，覆盖本地的全部标签和回收站内容。本地现在的内容将被替换，确定要拉取吗？"
+		"message": "拉取会用远端 Gist 上的备份，覆盖本地的所有配置、全部标签和回收站内容。<br>本地现在的所有内容（不包含密码令牌等敏感信息）将被替换，确定要拉取吗？"
 	},
 	"njSave": {
 		"message": "保存"
-	},
-	"secretSavedPlaceholder": {
-		"message": "已保存，留空表示不修改"
-	},
-	"secretSavedLast3": {
-		"message": "，末 3 位："
 	},
 	"secretSecurityNote": {
 		"message": "密码与令牌只在本机加密保存，不会明文存放，也不会进入任何备份、导出或 Gist。"
@@ -851,14 +842,32 @@
 	"webdavNewerWarnSuffix": {
 		"message": "），比当前插件还新，恢复前请确认。"
 	},
+	"logAction_gistPushGithub": {
+		"message": "GitHub 手动推送"
+	},
+	"logAction_gistPushGitee": {
+		"message": "Gitee 手动推送"
+	},
+	"logAction_gistPullGithub": {
+		"message": "GitHub 手动拉取"
+	},
+	"logAction_gistPullGitee": {
+		"message": "Gitee 手动拉取"
+	},
+	"logAction_gistAutoGithub": {
+		"message": "GitHub 自动推送"
+	},
+	"logAction_gistAutoGitee": {
+		"message": "Gitee 自动推送"
+	},
 	"logSectionGist": {
-		"message": "Gist 备份"
+		"message": "Gist"
 	},
 	"logSectionWebdav": {
 		"message": "WebDAV"
 	},
 	"logSectionImportExport": {
-		"message": "导入导出"
+		"message": "导入 / 导出"
 	},
 	"logSectionOps": {
 		"message": "操作日志"
@@ -875,7 +884,55 @@
 	"gistOldReadOnly": {
 		"message": "本地存的编号是旧版（3.1）的 Gist，只读不写；推送将使用新版自己的 Gist"
 	},
-	"discardedThresholdText": {
-		"message": "休眠阈值：组内标签超过下面这个数时，前面的直接打开、后面的休眠"
+	"njResultSuccess": {
+		"message": "成功"
+	},
+	"njResultFailed": {
+		"message": "失败"
+	},
+	"njResultTimeout": {
+		"message": "超时，30 秒内没有结果"
+	},
+	"njResultCanceled": {
+		"message": "已取消"
+	},
+	"webdavNoBackupYet": {
+		"message": "服务器上还没有备份版本。"
+	},
+	"webdavDeleteAll": {
+		"message": "删除全部备份"
+	},
+	"webdavDeleteAllConfirm": {
+		"message": "确定要删除服务器上的全部备份吗？删了就找不回来了。"
+	},
+	"webdavDeleteAllDone": {
+		"message": "已删除全部备份"
+	},
+	"njExportFilesTitle": {
+		"message": "导出文件"
+	},
+	"goToBottom": {
+		"message": "去底部"
+	},
+	"autoPushSkipNoToken": {
+		"message": "已跳过：令牌没有保存，这次没有推送"
+	},
+	"logSkipped": {
+		"message": "已跳过"
+	},
+	"logCanceled": {
+		"message": "取消"
+	},
+	"repoTokenLabel": {
+		"message": "仓库令牌"
+	},
+	"pushToGistShort": {
+		"message": "推送到 Gist"
+	},
+	"pullFromGistShort": {
+		"message": "从 Gist 拉取"
+	},
+	"gistAutoStatusSkippedPrefix": {
+		"message": "自动备份跳过"
 	}
 }

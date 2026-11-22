@@ -336,7 +336,7 @@
     // ===== 4.2 需求三：备份包含配置 =====
     // 进备份的配置键白名单：主题、各项开关、自动备份与保留规则、日志清理设置等用户配置。
     // 红线：WebDAV 地址/账号/密码、GitHub/Gitee 令牌、加密密钥、Gist 编号、日志内容、运行状态一律不进备份。
-    const BACKUP_SETTING_KEYS = ["themeMode", "options", "dragType", "autoSync", "delRetentionDays", "restoreDiscarded", "discardedThreshold", "webdavAutoBackup", "webdavIntervalHours", "webdavKeepDays", "webdavKeepCount", "gistAutoEnabled", "gistAutoIntervalMinutes", "logAutoCleanEnabled", "logKeepDays", "logKeepCount"];
+    const BACKUP_SETTING_KEYS = ["themeMode", "options", "dragType", "autoSync", "delRetentionDays", "webdavAutoBackup", "webdavIntervalHours", "webdavKeepDays", "webdavKeepCount", "gistAutoEnabled", "gistAutoIntervalMinutes", "logAutoCleanEnabled", "logKeepDays", "logKeepCount"];
 
     // 只挑白名单键（source 里有才带上），备份和恢复两边都用它把关
     function pickBackupSettings(source) {
@@ -407,16 +407,29 @@
     function njFilterDupTabs(tabs, set) {
         let kept = [];
         let dupCount = 0;
+        let dups = [];
         (Array.isArray(tabs) ? tabs : []).forEach(function (t) {
             let k = njTabDupKey(t);
             if (set.has(k)) {
                 dupCount += 1;
+                dups.push(t);
             } else {
                 set.add(k);
                 kept.push(t);
             }
         });
-        return {kept: kept, dupCount: dupCount};
+        return {kept: kept, dupCount: dupCount, dups: dups};
+    }
+
+    // 追加合并导入的日志（4.6.3 需求十七定格式，4.6.5 需求十二改定）：一条日志、标题只写状态；
+    // 去重是正常处理、不算失败——失败只认解析不了、无法导入的条目，去重条目也不再逐条写进详情（详情只列解析不了的行）
+    function njTextImportLog(kindLabel, importedGroups, importedTabs, dupGroups, dupSkipped, skipDetails) {
+        let detail = kindLabel + "导入 " + importedGroups + " 组 / " + importedTabs + " 条（去重跳过 " + dupGroups + " 组 / " + dupSkipped + " 条）";
+        if (skipDetails.badCount > 0) {
+            njLogEvent("importText", false, detail, skipDetails.lines.slice(0, 100), {result: "partial", failCount: skipDetails.badCount});
+        } else {
+            njLogEvent("importText", true, detail);
+        }
     }
 
     // ===== 4.5 需求八：备份导入按组时间排序 =====
@@ -454,10 +467,27 @@
     // ===== 4.2 需求四：统一操作日志 =====
     // 存 chrome.storage.local 的 njLogs 数组：{t: 时间戳, action: 动作, ok: 成功与否, detail: 简短说明}
     // 绝不记密码/令牌原文。自动清理：logAutoCleanEnabled（默认开）、logKeepDays（默认 30 天）、logKeepCount（默认 500 条），与 background.js 同一套规则
-    function njLogEvent(action, ok, detail, steps) {
+    // 4.6.6 需求一：页面侧写日志同样排队串行（与后台同一病根）；onDone 在自己这条真正落盘后才触发，恢复流程靠它串行不变
+    let njLogQueue = [];
+    let njLogWriting = false;
+    function njLogEvent(action, ok, detail, steps, extra, onDone) {
+        njLogQueue.push({action: action, ok: ok, detail: detail, steps: steps, extra: extra, onDone: onDone});
+        njPumpLogQueue();
+    }
+    function njPumpLogQueue() {
+        if (njLogWriting) { return; }
+        let job = njLogQueue.shift();
+        if (!job) { return; }
+        njLogWriting = true;
+        njWriteLogEntry(job);
+    }
+    function njWriteLogEntry(job) {
+        let action = job.action, ok = job.ok, detail = job.detail, steps = job.steps, extra = job.extra, onDone = job.onDone;
         chrome.storage.local.get(["njLogs", "logAutoCleanEnabled", "logKeepDays", "logKeepCount"], function (st) {
             let logs = Array.isArray(st.njLogs) ? st.njLogs : [];
-            let njEntry = {t: Date.now(), action: String(action), ok: !!ok, detail: detail ? String(detail).slice(0, 200) : ""};
+            let njEntry = {t: Date.now(), action: String(action), ok: !!ok, detail: detail ? String(detail).slice(0, 500) : ""};
+            if (extra && extra.result) { njEntry.result = String(extra.result); }
+            if (extra && extra.failCount) { njEntry.failCount = extra.failCount; }
             if (Array.isArray(steps) && steps.length) {
                 njEntry.steps = steps.map(function (s) { return String(s).slice(0, 300); });
             }
@@ -471,12 +501,29 @@
                     logs = logs.slice(logs.length - keepCount);
                 }
             }
-            chrome.storage.local.set({njLogs: logs});
+            chrome.storage.local.set({njLogs: logs}, function () {
+                njLogWriting = false;
+                // 第三方审核采纳：onDone 抛错也不能堵住队列，泵下一条放 finally
+                try { if (typeof onDone === "function") { onDone(); } } finally { njPumpLogQueue(); }
+            });
         });
     }
 
     function njLogActionText(action) {
         return chrome.i18n.getMessage("logAction_" + action) || action;
+    }
+
+    // 4.6.6 需求三：Gist 简条日志的标题按详情里的仓库名拼新风格（GitHub/Gitee 手动拉取/手动推送/自动推送）；
+    // 认不出仓库时退回通用名。带步骤的过程日志标题走 NJ_LOG_PROCESS_LABELS 与写入时的类型文字，不经这里。
+    function njLogLabelOf(e) {
+        let base = njLogActionText(e.action);
+        let gistKinds = {gistPush: "Push", gistRateLimited: "Push", gistPull: "Pull", gistAutoBackup: "Auto", gistAutoBackupRateLimited: "Auto", gistAutoBackupSkipped: "Auto"};
+        if (!Object.prototype.hasOwnProperty.call(gistKinds, e.action)) { return base; }
+        // 第三方审核采纳：仓库名只认详情开头（各写入点都把仓库名放最前），避免错误文本里出现另一家名字时误判
+        let platMatch = /^\s*(github|gitee)/i.exec(e.detail || "");
+        let plat = platMatch ? (platMatch[1].toLowerCase() === "gitee" ? "Gitee" : "Github") : "";
+        if (!plat) { return base; }
+        return chrome.i18n.getMessage("logAction_gist" + gistKinds[e.action] + plat) || base;
     }
 
     // ===== 4.3 需求六：日志页改版（四分区） =====
@@ -522,8 +569,9 @@
             opLogs.forEach(function (e) {
                 if (!e || typeof e.t !== "number") { return; }
                 bySection[njLogSectionOf(e.action)].push({
-                    t: e.t, label: njLogActionText(e.action), ok: !!e.ok,
+                    t: e.t, label: njLogLabelOf(e), ok: e.action === "gistAutoBackupSkipped" ? "skip" : !!e.ok,
                     detail: e.detail || "", steps: Array.isArray(e.steps) ? e.steps : null,
+                    result: e.result || "", failCount: e.failCount || 0,
                     src: "op", action: e.action
                 });
             });
@@ -541,7 +589,7 @@
                 }
                 // 结果：新条目自带 ok；老条目按步骤里有没有「失败」字样推断
                 let gSteps = Array.isArray(g.handleGistLogs) ? g.handleGistLogs : [];
-                let gOk = typeof g.ok === "boolean" ? g.ok : (gSteps.length ? !gSteps.some(function (line) { return /失败|Failed|failed/.test(String(line)); }) : null);
+                let gOk = (typeof g.ok === "boolean" || g.ok === "skip" || g.ok === "cancel") ? g.ok : (gSteps.length ? (gSteps.some(function (line) { return /已取消|Canceled|Cancelled/.test(String(line)); }) ? "cancel" : (gSteps.some(function (line) { return /失败|Failed|failed/.test(String(line)); }) ? false : (gSteps.some(function (line) { return /跳过|Skipped/.test(String(line)); }) ? "skip" : true))) : null);
                 bySection.gist.push({
                     t: gt,
                     label: labelKey ? chrome.i18n.getMessage(labelKey) : (g.handleGistType || ""),
@@ -566,9 +614,16 @@
                     return "";
                 }
                 function procKind(ptype) {
-                    if (/^push_/.test(ptype || "")) { return "push"; }
-                    if (/^pull_/.test(ptype || "")) { return "pull"; }
-                    if (ptype) { return "auto"; }
+                    let t = ptype || "";
+                    if (/^push_/.test(t)) { return "push"; }
+                    if (/^pull_/.test(t)) { return "pull"; }
+                    // 4.6 需求十修复：过程日志的 type 存的是本地化标题（如「手动推送到 GitHub」「自动推送到 Gitee」、
+                    // 英文 CLICK TO PUSH / AUTO PUSH），旧代码把手动的也一律判成 auto，去重对不上、手动推送仍出两条。
+                    // 改按标题关键词判定：含「自动 / AUTO」是自动备份；含「推送 / PUSH」是手动推送；含「拉取 / PULL」是手动拉取。
+                    if (/自动|AUTO/i.test(t)) { return "auto"; }
+                    if (/推送|PUSH/i.test(t)) { return "push"; }
+                    if (/拉取|PULL/i.test(t)) { return "pull"; }
+                    if (t) { return "auto"; }
                     return "";
                 }
                 let procs = bySection.gist.filter(function (e) { return e.src === "proc" && e.steps && e.steps.length > 0; });
@@ -599,25 +654,32 @@
                 let rows = shown.map(function (e, idx) {
                     let eid = s.key + "_" + idx;
                     let time = e.t ? new Date(e.t).toLocaleString() : "";
-                    let state = e.ok === null ? "" : (e.ok
-                        ? ` · <span style="color:green;">${chrome.i18n.getMessage("logSuccess")}</span>`
-                        : ` · <span style="color:red;">${chrome.i18n.getMessage("logFailed")}</span>`);
+                    let state = e.ok === "cancel"
+                        ? `<span style="color:gray;">${chrome.i18n.getMessage("logCanceled")}</span>`
+                        : (e.ok === "skip"
+                        ? `<span style="color:gray;">${chrome.i18n.getMessage("logSkipped")}</span>`
+                        : (e.ok === null ? "" : (e.ok
+                        ? `<span style="color:green;">${chrome.i18n.getMessage("logSuccess")}</span>`
+                        : `<span style="color:red;">${chrome.i18n.getMessage("logFailed")}</span>`)));
                     let hasDetail = (e.steps && e.steps.length > 0) || !!e.detail;
                     let detailShort = "";
-                    if (e.detail) {
-                        let d = e.detail.length > 80 ? e.detail.slice(0, 80) + "…" : e.detail;
-                        detailShort = " · " + escapeHtml(d);
+                    // 4.6 需求九起导入导出区标题只写状态；4.6.5 需求十一南极定：所有分区统一——标题只有类别与是否成功，详情（含错误码）点开才看，不再拼进标题
+                    // 4.6 需求九：导入部分失败时标题带上失败条数与「部分失败」字样
+                    let stateOverride = "";
+                    if (e.result === "partial") {
+                        stateOverride = `<span style="color:#d58512;">部分失败${e.failCount ? ` · 共失败 ${e.failCount} 条` : ""}</span>`;
                     }
                     let detailHtml = "";
                     if (hasDetail && njLogExpandedEntries[eid]) {
                         let body = e.steps && e.steps.length > 0
-                            ? e.steps.map(function (line) { return escapeHtml(String(line)); }).join("<br>")
+                            ? (e.detail ? escapeHtml(e.detail) + "<br>" : "") + e.steps.map(function (line) { return escapeHtml(String(line)); }).join("<br>")
                             : escapeHtml(e.detail);
                         detailHtml = `<div style="padding:6px 10px;margin:2px 0 6px;background:rgba(127,127,127,.08);border-radius:4px;font-size:92%;">${body}</div>`;
                     }
                     let cursor = hasDetail ? "cursor:pointer;" : "";
-                    let arrow = hasDetail ? (njLogExpandedEntries[eid] ? " ▾" : " ▸") : "";
-                    return `<div data-njlog-entry="${hasDetail ? eid : ""}" style="padding:4px 0;border-bottom:1px solid #eee;${cursor}">${time} · ${escapeHtml(e.label)}${state}${detailShort}${arrow}</div>${detailHtml}`;
+                    let arrow = hasDetail ? (njLogExpandedEntries[eid] ? "▾" : "▸") : "";
+                    // 4.6.6 审核补修（第 3 条排版，南极确认的模板第二版）：日志行三段对齐——时间固定最左、名称列约 300px（过长截断）、状态紧跟名称列成列对齐、箭头在最末尾；整行可点展开详情（原有委托不变）
+                    return `<div data-njlog-entry="${hasDetail ? eid : ""}" style="display:flex;align-items:baseline;gap:12px;padding:5px 0;border-bottom:1px solid #eee;${cursor}"><span style="flex:0 0 auto;white-space:nowrap;">${time}</span><span style="flex:0 1 300px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(e.label)}">${escapeHtml(e.label)}</span><span style="flex:0 0 auto;white-space:nowrap;">${e.result === "partial" ? stateOverride : state}</span><span style="flex:0 0 auto;width:14px;text-align:right;">${arrow}</span></div>${detailHtml}`;
                 }).join("");
                 let moreHtml = "";
                 if (entries.length > 5) {
@@ -748,7 +810,7 @@
         return "Basic " + btoa(binary);
     }
 
-    // ===== 阶段D：全局搜索 / 标签组备注 / 恢复时休眠打开 =====
+    // ===== 阶段D：全局搜索 / 标签组备注 =====
     // 全局搜索（纯函数，可单测）：给定标签组数组和关键词，返回命中的组与标签。
     // 匹配规则（不区分大小写）：
     // - 组名命中 → 该组全部标签计入结果；
@@ -798,138 +860,10 @@
         return result;
     }
 
-    // 批量恢复时打开一个标签：
-    // useDiscarded 为 false 时与原行为完全一致（chrome.tabs.create({url})）；
-    // 为 true 时先以未激活方式打开，等加载完成（网址已提交）再 discard 成休眠状态（点开才真正加载，省内存）。
-    // tabs.create 本身不支持直接建休眠标签（实测报错）；建完立刻 discard 会让网址在提交前被冻结、激活后空白页。
-    // 4.5 需求一加固：4.4 上线后用户实测整体不休眠（助手在测试环境按真实 UI 流程复测是通过的，
-    // 怀疑真实环境里存在读到旧设置、或 discard 静默失败被吞掉的情况），本版做三件事：
-    // (1) 打开整组时现读设置，不用页面渲染时缓存的值（见 njOpenWholeGroup）；
-    // (2) discard 后回查标签状态确认真的休眠了，没生效自动重试（最多 3 次），失败原因不再吞掉；
-    // (3) 每次打开整组（且本应有休眠标签时）把结果汇总写一条日志（动作 discardOpen，进操作日志区），
-    //     用户在日志页就能看到直开/休眠成功/休眠失败各多少、失败原因是什么。
-    function openRestoredTab(url, useDiscarded, batch) {
-        if (!useDiscarded) {
-            chrome.tabs.create({
-                url: url
-            });
-            return;
-        }
-        chrome.tabs.create({
-            url: url, active: false
-        }, function (tab) {
-            if (!tab || !tab.id) {
-                njDiscardSettle(batch, false, "标签创建失败");
-                return;
-            }
-            let tabId = tab.id;
-            let begun = false;
-            let settled = false;
-            let pollTimer = null;
-            function settle(ok, errMsg) {
-                if (settled) {
-                    return;
-                }
-                settled = true;
-                if (pollTimer) {
-                    clearInterval(pollTimer);
-                }
-                chrome.tabs.onUpdated.removeListener(listener);
-                njDiscardSettle(batch, ok, errMsg);
-            }
-            function tryDiscard(attempt) {
-                chrome.tabs.discard(tabId, function () {
-                    let err = chrome.runtime.lastError;
-                    if (!err) {
-                        chrome.tabs.get(tabId, function (t) {
-                            void chrome.runtime.lastError;
-                            if (t && t.discarded) {
-                                settle(true);
-                            } else if (attempt < 2) {
-                                setTimeout(function () { tryDiscard(attempt + 1); }, 800);
-                            } else {
-                                settle(false, "休眠指令已发但状态未生效");
-                            }
-                        });
-                    } else if (attempt < 2) {
-                        setTimeout(function () { tryDiscard(attempt + 1); }, 800);
-                    } else {
-                        settle(false, (err && err.message) || "休眠失败");
-                    }
-                });
-            }
-            function beginDiscard() {
-                if (begun || settled) {
-                    return;
-                }
-                begun = true;
-                chrome.tabs.onUpdated.removeListener(listener);
-                tryDiscard(0);
-            }
-            function listener(id, changeInfo) {
-                if (id === tabId && changeInfo.status === 'complete') {
-                    beginDiscard();
-                }
-            }
-            chrome.tabs.onUpdated.addListener(listener);
-            // 轮询兜底：完成事件偶尔漏掉时靠轮询发现加载完成
-            let pollCount = 0;
-            pollTimer = setInterval(function () {
-                pollCount += 1;
-                if (begun || settled || pollCount > 40) {
-                    if (pollTimer) {
-                        clearInterval(pollTimer);
-                    }
-                    return;
-                }
-                chrome.tabs.get(tabId, function (t) {
-                    if (chrome.runtime.lastError) {
-                        settle(false, "标签已被关闭");
-                        return;
-                    }
-                    if (t && t.status === 'complete') {
-                        beginDiscard();
-                    }
-                });
-            }, 700);
-            // 20 秒硬兜底：此时网址早已提交，直接尝试休眠
-            setTimeout(function () {
-                beginDiscard();
-            }, 20000);
-            if (tab.status === 'complete') {
-                beginDiscard();
-            }
-        });
-    }
-
-    // 休眠结果记账：一个组里应休眠的标签全部尘埃落定后，汇总写一条日志
-    function njDiscardSettle(batch, ok, errMsg) {
-        if (!batch) {
-            return;
-        }
-        batch.settled += 1;
-        if (ok) {
-            batch.ok += 1;
-        } else {
-            batch.fail += 1;
-            if (errMsg && !batch.err) {
-                batch.err = errMsg;
-            }
-        }
-        if (batch.settled >= batch.expect) {
-            let detail = batch.label + "：" + batch.direct + " 条直开、" + batch.ok + " 条休眠成功";
-            if (batch.fail) {
-                detail += "、" + batch.fail + " 条休眠失败" + (batch.err ? ("（" + batch.err + "）") : "");
-            }
-            njLogEvent("discardOpen", batch.fail === 0, detail);
-        }
-    }
-
-    // 打开整组（4.5 需求一）：点击时现读休眠开关与阈值，不用渲染时缓存的值——
-    // 页面开着时在别处改了设置、或页面长时间没重渲染，都不会再读到旧设置。
-    // 打开时删除整组仍排在建标签之前（原注释：顺序反了就不生效）。
+    // 打开整组（4.6 需求一：休眠打开功能已取消，恢复为普通打开）：
+    // 点击时现读打开方式设置；打开时删除整组仍排在建标签之前（原注释：顺序反了就不生效）。
     function njOpenWholeGroup(group, isLock, groupTitle, removeGroupFn) {
-        chrome.storage.local.get(["options", "restoreDiscarded", "discardedThreshold"], function (storage) {
+        chrome.storage.local.get(["options"], function (storage) {
             let tabsArr = group.tabs().slice();
             let opts = storage.options || {};
             if (opts.deleteTabOnOpen === 'yes') {
@@ -937,23 +871,8 @@
                     removeGroupFn();
                 }
             }
-            let rd = storage.restoreDiscarded === true;
-            let n = parseInt(storage.discardedThreshold, 10);
-            if (!(n >= 1)) {
-                n = 10;
-            }
-            let batch = null;
-            if (rd && tabsArr.length > n) {
-                batch = {
-                    label: groupTitle || "",
-                    direct: n,
-                    expect: tabsArr.length - n,
-                    settled: 0, ok: 0, fail: 0, err: ""
-                };
-            }
             for (let j = 0; j < tabsArr.length; j += 1) {
-                let useDiscarded = rd && tabsArr.length > n && j >= n;
-                openRestoredTab(tabsArr[j].url, useDiscarded, useDiscarded ? batch : null);
+                chrome.tabs.create({url: tabsArr[j].url});
             }
         });
     }
@@ -1067,7 +986,7 @@
         $("#tabGroups").addClass("hide");
         $("#tabGroupsBak").addClass("hide");
         $("#importDefault").addClass("hide");
-        $("#exportDefault").addClass("hide");
+        $("#exportDefault").addClass("hide"); $("#njExportFiles").addClass("hide"); $("#njImportBackup").addClass("hide");
         $("#searchArea").removeClass("hide");
         let pageEl = document.getElementById("searchPage");
         if (!pageEl) {
@@ -1230,9 +1149,11 @@
                     <span class="nj-brand-wrap">
                         <span class="nj-brand-col">
                             <a class="nj-brand" href="#home">NJ-Tab</a>
-                            <a class="nj-version" href="https://github.com/NJYZ96/NJ-Tab/releases" target="_blank" rel="noopener" title="${chrome.i18n.getMessage("versionReleasesTitle")}">v${chrome.runtime.getManifest().version}</a>
+                            <span class="nj-brand-row2">
+                                <a class="nj-repo-link" href="https://github.com/NJYZ96/NJ-Tab" target="_blank" rel="noopener" title="GitHub"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
+                                <a class="nj-version" href="https://github.com/NJYZ96/NJ-Tab/releases" target="_blank" rel="noopener" title="${chrome.i18n.getMessage("versionReleasesTitle")}">v${chrome.runtime.getManifest().version}</a>
+                            </span>
                         </span>
-                        <a class="nj-repo-link" href="https://github.com/NJYZ96/NJ-Tab" target="_blank" rel="noopener" title="GitHub"><svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></a>
                     </span>
                     <div class="nj-search">
                         <div id="searchArea">
@@ -1243,15 +1164,15 @@
                     <div class="nj-menu">
                         <div class="nj-menu-row">
                             <a href="#home">${chrome.i18n.getMessage("home")}</a>
+                            <a href="#baks"><span id="showBaks">${chrome.i18n.getMessage("showBaks")}</span></a>
                             <a href="#gist">${chrome.i18n.getMessage("navGistBackup")}</a>
                             <a href="#webdav">${chrome.i18n.getMessage("navWebdav")}</a>
                             <a href="#importExport">${chrome.i18n.getMessage("importExport")}</a>
+                            <a href="#options">${chrome.i18n.getMessage("optionsValue")}</a>
                             <a href="#logs">${chrome.i18n.getMessage("showLog")}</a>
-                            <a href="#baks"><span id="showBaks">${chrome.i18n.getMessage("showBaks")}</span></a>
                             <button type="button" id="themeCycleBtn" class="nj-theme-btn"></button>
                         </div>
                         <div class="nj-menu-row nj-menu-row2">
-                            <a href="#options">${chrome.i18n.getMessage("optionsValue")}</a>
                             <span class="nj-status-group"><span id="totals" class="nj-status"></span></span>
                         </div>
                     </div>
@@ -1261,24 +1182,48 @@
         // 动态加载内容
         document.getElementById("body").innerHTML = `
         <div>
+                <div id="njExportFiles" class="hide">
+                    <div class="nj-section-title">${chrome.i18n.getMessage("njExportFilesTitle")}</div>
+<div style="margin:10px 0 5px">
+                        <button id="exportHtml" type="button" class="btn btn-default">${chrome.i18n.getMessage("exportHtmlFile")}</button>
+                        <button id="exportBackup" type="button" class="btn btn-default">${chrome.i18n.getMessage("exportBackupFile")}</button>
+                    </div>
+                    <div class="nj-hint">${chrome.i18n.getMessage("exportFileTip")}</div>
+                                    </div>
+                <div id="njImportBackup" class="hide">
+                    <div class="nj-section-title">${chrome.i18n.getMessage("importBackupFile")}</div>
+<div style="margin:14px 0 5px">
+                        <label for="importBackupFile" class="btn btn-default" style="font-weight:normal;margin-bottom:0;">${chrome.i18n.getMessage("importBackupFile")}</label>
+                        <input type="file" id="importBackupFile" accept=".json" class="hide">
+                        <span id="importBackupFileName" class="nj-file-name"></span>
+                        <button id="importBackupConfirmBtn" type="button" class="btn btn-default hide">${chrome.i18n.getMessage("importConfirmBtn")}</button>
+                    </div>
+                    <div class="nj-hint">${chrome.i18n.getMessage("importBackupTip")}</div>
+                </div>
                 <div id="exportDefault" class="hide">
-                    <div class="nj-section-title">${chrome.i18n.getMessage("hideShowExportFunction")}</div>
+<div class="nj-section-title">${chrome.i18n.getMessage("hideShowExportFunction")}</div>
                     <textarea id="exportTextarea" style="width: 100%; height: 200px; margin-top:5px"></textarea>
                     <div style="margin-bottom:5px">
                         <button id="export" type="button" class="btn btn-default">${chrome.i18n.getMessage("exportToLocal")}</button>
                     </div>
                     <div class="nj-hint">${chrome.i18n.getMessage("exportWarn")}</div>
-                    <div style="margin:10px 0 5px">
-                        <button id="exportHtml" type="button" class="btn btn-default">${chrome.i18n.getMessage("exportHtmlFile")}</button>
-                        <button id="exportBackup" type="button" class="btn btn-default">${chrome.i18n.getMessage("exportBackupFile")}</button>
+                                    </div>
+                <div id="importDefault" class="hide">
+                    <div class="nj-section-title">${chrome.i18n.getMessage("hideShowImportDefaultFunction")}</div>
+                    <textarea id="importDefaultTextarea" style="width: 100%; height: 200px; margin-top:5px">
+标签组名 | 锁定 | 置顶 | 这里是这组的备注
+https://www.baidu.com | BaiDu | 2026-01-01 12:00:00
+https://www.google.com | Google | 2026-01-01 12:00:00
+
+ | 解锁 | 不置顶
+https://www.baidu.com | BaiDu | 2026-01-01 12:00:00
+https://www.google.com | Google | 2026-01-01 12:00:00
+</textarea>
+                    <div style="margin-bottom:5px">
+                        <button id="importDefaultMode" type="button"
+                            class="btn btn-default">${chrome.i18n.getMessage("importToLocal")}</button>
                     </div>
-                    <div class="nj-hint">${chrome.i18n.getMessage("exportFileTip")}</div>
-                    <div style="margin:14px 0 5px">
-                        <label for="importBackupFile" class="btn btn-default" style="font-weight:normal;margin-bottom:0;">${chrome.i18n.getMessage("importBackupFile")}</label>
-                        <input type="file" id="importBackupFile" accept=".json" class="hide">
-                        <span id="importBackupFileName" class="nj-file-name"></span>
-                    </div>
-                    <div class="nj-hint">${chrome.i18n.getMessage("importBackupTip")}</div>
+                    <div class="nj-hint">${chrome.i18n.getMessage("importWarnDefault")}</div>
                     <div class="nj-hint">${chrome.i18n.getMessage("importDedupHint")}</div>
                 </div>
                 <div id="importOneTab"  class="hide">
@@ -1297,24 +1242,6 @@ https://www.google.com | Google
                     <div class="nj-hint">${chrome.i18n.getMessage("importWarn")}</div>
                     <div class="nj-hint">${chrome.i18n.getMessage("importDedupHint")}</div>
                 </div>
-                <div id="importDefault" class="hide">
-                    <div class="nj-section-title">${chrome.i18n.getMessage("hideShowImportDefaultFunction")}</div>
-                    <textarea id="importDefaultTextarea" style="width: 100%; height: 200px; margin-top:5px">
-标签组名 | 锁定 | 置顶
-https://www.baidu.com | BaiDu
-https://www.google.com | Google
-
- | 解锁 | 不置顶
-https://www.baidu.com | BaiDu
-https://www.google.com | Google
-</textarea>
-                    <div style="margin-bottom:5px">
-                        <button id="importDefaultMode" type="button"
-                            class="btn btn-default">${chrome.i18n.getMessage("importToLocal")}</button>
-                    </div>
-                    <div class="nj-hint">${chrome.i18n.getMessage("importWarnDefault")}</div>
-                    <div class="nj-hint">${chrome.i18n.getMessage("importDedupHint")}</div>
-                </div>
                 <div id="tabGroups"></div>
                 <div id="logs"></div>
                 <div id="njLogsPanel" class="hide" style="margin-top:20px;"></div>
@@ -1324,7 +1251,10 @@ https://www.google.com | Google
                 <div id="gistPage" class="div-top hide"></div>
                 <div id="webdavPage" class="div-top hide"></div>
             </div>
-            <a href="#top" class="btn btn-primary fixed-bottom-right">${chrome.i18n.getMessage("backToTop")}</a>
+            <div id="njScrollBtns" class="nj-scroll-btns">
+                <button type="button" id="njScrollTopBtn" class="nj-scroll-btn" title="${chrome.i18n.getMessage("backToTop")}">&#8593;</button>
+                <button type="button" id="njScrollBottomBtn" class="nj-scroll-btn" title="${chrome.i18n.getMessage("goToBottom")}">&#8595;</button>
+            </div>
             <hr>
             <div class="blog-footer">
             <p>${chrome.i18n.getMessage("sourceCode")}<a
@@ -1410,17 +1340,20 @@ https://www.google.com | Google
                     for (let i = 0; i < items.tabGroups_num; i++) {
                         tabGroupsStr += items["tabGroups_" + i];
                     }
-                    tabGroups = JSON.parse(tabGroupsStr);
+                    try { tabGroups = JSON.parse(tabGroupsStr); } catch (e) { tabGroups = []; } // 4.6.4.1 审查修复：分片损坏时不中断
                 }
                 // 4.4 需求八：去重参照集＝现有全部标签（跨组），导入过程中先到先得
                 let dupSet = njBuildDupSet(tabGroups);
                 let dupSkipped = 0;
+                let dupGroups = 0;
+                let skipLines = [];
+                let badCount = 0;
                 let importedGroups = 0;
                 let importedTabs = 0;
                 let importOnetabTextarea = $('#importOnetabTextarea').val();
                 console.log(importOnetabTextarea)
                 if (!importOnetabTextarea) {
-                    alert(`${chrome.i18n.getMessage("importTextareaTip")}`)
+                    njAlert(chrome.i18n.getMessage("importTextareaTip"));
                     return;
                 }
                 let content = importOnetabTextarea.split("\n");
@@ -1432,10 +1365,16 @@ https://www.google.com | Google
                         if (i === content.length && tabsArr.length === 0) {
                             break;
                         }
+                        // 4.6.5 需求十三附带：空块不建组（同默认文本导入）
+                        if (tabsArr.length === 0) {
+                            continue;
+                        }
                         // 4.4 需求八：逐条去重；整组都被去重掉时不再追加空组（源文本里本就空组的情况保持原样）
                         let parsedCount = tabsArr.length;
                         let filtered = njFilterDupTabs(tabsArr, dupSet);
                         dupSkipped += filtered.dupCount;
+                        // 4.6.5 需求十二：去重条目不再逐条写进日志详情（只在首行留汇总数字）
+                        if (parsedCount > 0 && filtered.kept.length === 0) { dupGroups += 1; }
                         if (parsedCount === 0 || filtered.kept.length > 0) {
                             tabGroups.push(makeTabGroup(filtered.kept));
                             importedGroups += 1;
@@ -1445,17 +1384,19 @@ https://www.google.com | Google
                         continue;
                     }
                     let lineList = content[i].split(" | ");
-                    let title = lineList[1];
-                    if (title && typeof (title) !== undefined) {
-                        title = title.replace(emojiReg, "");
+                    if (!lineList[0]) {
+                        badCount += 1;
+                        skipLines.push("解析不了：" + content[i]);
+                        continue;
                     }
-                    let tab = {"title": title, "url": lineList[0]}
+                    // 4.6.5 需求十三：标题本身可能带「 | 」，第一段是网址、其余全部拼回标题；也不再删标题里的表情（会改坏标题、还让去重认不出）
+                    let tab = {"title": lineList.slice(1).join(" | "), "url": lineList[0]}
                     tabsArr.push(tab);
                 }
                 saveShardings(tabGroups, "object");
-                njLogEvent("importText", true, "OneTab 导入 " + importedGroups + " 组 / " + importedTabs + " 条" + (dupSkipped > 0 ? "，去重跳过 " + dupSkipped + " 条" : ""));
-                alert(`${chrome.i18n.getMessage("backupImportSuccess")}` + (dupSkipped > 0 ? `\n${dupSkipped}${chrome.i18n.getMessage("dedupSkipped")}` : ""));
-                refresh()
+                njTextImportLog("OneTab ", importedGroups, importedTabs, dupGroups, dupSkipped, {lines: skipLines, badCount: badCount});
+                njAlert(`${chrome.i18n.getMessage("backupImportSuccess")}` + (dupSkipped > 0 ? `\n${dupSkipped}${chrome.i18n.getMessage("dedupSkipped")}` : ""), null, 6000);
+                njRenderListWhenIdle();
             });
         });
 
@@ -1469,27 +1410,35 @@ https://www.google.com | Google
                     for (let i = 0; i < items.tabGroups_num; i++) {
                         tabGroupsStr += items["tabGroups_" + i];
                     }
-                    tabGroups = JSON.parse(tabGroupsStr);
+                    try { tabGroups = JSON.parse(tabGroupsStr); } catch (e) { tabGroups = []; } // 4.6.4.1 审查修复：分片损坏时不中断
                 }
                 // 4.4 需求八：去重参照集＝现有全部标签（跨组），导入过程中先到先得
                 let dupSet = njBuildDupSet(tabGroups);
                 let dupSkipped = 0;
+                let dupGroups = 0;
+                let skipLines = [];
+                let badCount = 0;
                 let importedGroups = 0;
                 let importedTabs = 0;
                 let importDefaultTextarea = $('#importDefaultTextarea').val();
                 console.log(importDefaultTextarea)
                 if (!importDefaultTextarea) {
-                    alert(`${chrome.i18n.getMessage("importTextareaTip")}`)
+                    njAlert(chrome.i18n.getMessage("importTextareaTip"));
                     return;
                 }
                 let content = importDefaultTextarea.split("\n");
                 let tabsArr = [];
+                let groupNote = "";
                 let _isPined = '不置顶'
                 // i <= content.length：最后多跑一趟“虚拟空行”，让末尾没有空行结尾的最后一组也能成组（与需求二同理）
                 for (let i = 0; i <= content.length; i++) {
                     if (i === content.length || content[i] === "") {
                         if (i === content.length && tabsArr.length === 0) {
                             break;
+                        }
+                        // 4.6.5 需求十三附带：连续空行或结尾多余空行形成的空块不建组（以前会多出一个无名空组，数字对不上）
+                        if (tabsArr.length === 0) {
+                            continue;
                         }
                         console.log(tabsArr[0])
                         let isLock = false
@@ -1516,12 +1465,17 @@ https://www.google.com | Google
                         let parsedCount = tabsArr.length;
                         let filtered = njFilterDupTabs(tabsArr, dupSet);
                         dupSkipped += filtered.dupCount;
+                        // 4.6.5 需求十二：去重条目不再逐条写进日志详情（只在首行留汇总数字）
+                        if (parsedCount > 0 && filtered.kept.length === 0) { dupGroups += 1; }
                         if (parsedCount === 0 || filtered.kept.length > 0) {
                             // 判断导入的数据是否有置顶，有置顶的话，要置顶到最上面，其他数据追加到最后
+                            let newGroup = makeTabGroup(filtered.kept, isLock, groupTitle, isPined);
+                            newGroup.note = groupNote;
+                            groupNote = "";
                             if (isPined) {
-                                tabGroups.splice(0, 0, makeTabGroup(filtered.kept, isLock, groupTitle, isPined));
+                                tabGroups.splice(0, 0, newGroup);
                             } else {
-                                tabGroups.push(makeTabGroup(filtered.kept, isLock, groupTitle, isPined));
+                                tabGroups.push(newGroup);
                             }
                             importedGroups += 1;
                             importedTabs += filtered.kept.length;
@@ -1530,26 +1484,45 @@ https://www.google.com | Google
                         continue;
                     }
                     let lineList = content[i].split(" | ");
-                    let title = lineList[1];
-                    if (title && typeof (title) !== undefined) {
-                        title = title.replace(emojiReg, "");
+                    if (tabsArr.length > 0 && !lineList[0]) {
+                        badCount += 1;
+                        skipLines.push("解析不了：" + content[i]);
+                        continue;
                     }
-                    let tab = {"title": title, "url": lineList[0]}
+                    // 4.6.5 需求十三：标题、组名本身可能带「 | 」，一律从两头解析、中间拼回，不再截断；也不再删标题里的表情
+                    let tab = {"title": "", "url": lineList[0]}
                     if (tabsArr.length === 0) {
-                        // 组头行：第 3 段是置顶标记（只认组头行，避免标签行的时间段干扰）
-                        if (lineList.length > 2) {
-                            _isPined = lineList[2]
+                        // 组头行：靠「锁定/解锁」「置顶/不置顶」两个固定词定位，前面的拼回组名、后面的拼回备注（4.6.5 需求八）
+                        let lockIdx = -1;
+                        for (let li = 1; li + 1 < lineList.length; li++) {
+                            if ((lineList[li] === "锁定" || lineList[li] === "解锁") && (lineList[li + 1] === "置顶" || lineList[li + 1] === "不置顶")) { lockIdx = li; break; }
                         }
-                    } else if (lineList.length > 2 && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(lineList[2])) {
-                        // 4.3 需求四：标签行第 3 段是添加时间，读回来；老文本没这段、互不影响
-                        tab.addTime = lineList[2];
+                        if (lockIdx >= 0) {
+                            tab.url = lineList.slice(0, lockIdx).join(" | ");
+                            tab.title = lineList[lockIdx];
+                            _isPined = lineList[lockIdx + 1];
+                            groupNote = lineList.slice(lockIdx + 2).join(" | ");
+                        } else {
+                            // 找不到固定词时按老位置兜底
+                            tab.title = lineList[1];
+                            if (lineList.length > 2) { _isPined = lineList[2]; }
+                            groupNote = lineList.length > 3 ? lineList.slice(3).join(" | ") : "";
+                        }
+                    } else {
+                        // 标签行：第一段网址、最后一段是时间格式的取作添加时间（4.3 需求四）、中间全部拼回标题
+                        let segs = lineList.slice(1);
+                        if (segs.length > 1 && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(segs[segs.length - 1])) {
+                            tab.addTime = segs[segs.length - 1];
+                            segs = segs.slice(0, -1);
+                        }
+                        tab.title = segs.join(" | ");
                     }
                     tabsArr.push(tab);
                 }
                 saveShardings(tabGroups, "object");
-                njLogEvent("importText", true, "默认格式导入 " + importedGroups + " 组 / " + importedTabs + " 条" + (dupSkipped > 0 ? "，去重跳过 " + dupSkipped + " 条" : ""));
-                alert(`${chrome.i18n.getMessage("backupImportSuccess")}` + (dupSkipped > 0 ? `\n${dupSkipped}${chrome.i18n.getMessage("dedupSkipped")}` : ""));
-                refresh()
+                njTextImportLog("默认文本 ", importedGroups, importedTabs, dupGroups, dupSkipped, {lines: skipLines, badCount: badCount});
+                njAlert(`${chrome.i18n.getMessage("backupImportSuccess")}` + (dupSkipped > 0 ? `\n${dupSkipped}${chrome.i18n.getMessage("dedupSkipped")}` : ""), null, 6000);
+                njRenderListWhenIdle();
             });
         });
 
@@ -1563,7 +1536,7 @@ https://www.google.com | Google
                     for (let i = 0; i < items.tabGroups_num; i++) {
                         tabGroupsStr += items["tabGroups_" + i];
                     }
-                    tabGroups = JSON.parse(tabGroupsStr);
+                    try { tabGroups = JSON.parse(tabGroupsStr); } catch (e) { tabGroups = []; } // 4.6.4.1 审查修复：分片损坏时不中断
                 }
                 $('#exportTextarea').val();
                 let exportTextarea = "";
@@ -1579,7 +1552,9 @@ https://www.google.com | Google
                     if (groupTitle === "undefined" || typeof (groupTitle) === "undefined") {
                         groupTitle = ""
                     }
-                    let groupInfo = groupTitle + " | " + isLock + " | " + isPined + "\n"
+                    // 4.6.5 需求八：组头行第 4 段带上备注（有备注才加这一段）；老文本只有 3 段、照样能导入
+                    let groupNote = (typeof tabGroups[i].note === "string") ? tabGroups[i].note : "";
+                    let groupInfo = groupTitle + " | " + isLock + " | " + isPined + (groupNote ? " | " + groupNote : "") + "\n"
                     exportTextarea += groupInfo
                     for (let j = 0; j < tabGroups[i].tabs.length; j++) {
                         // 4.3 需求四：导出文本带上每条标签的添加时间（第 3 段）；没有的用分组时间顶上
@@ -1621,7 +1596,9 @@ https://www.google.com | Google
                     pinnedText: `${chrome.i18n.getMessage("htmlPinned")}`
                 });
                 downloadTextFile("NJ-Tab-Backup-" + formatBackupTimestamp(now) + ".html", html, "text/html");
-                njLogEvent("exportPage", true, "");
+                let expPageTabs = 0;
+                (items.tabGroups || []).forEach(function (g) { expPageTabs += (g.tabs || []).length; });
+                njLogEvent("exportPage", true, "导出 " + (items.tabGroups || []).length + " 组 / " + expPageTabs + " 条");
             });
         });
 
@@ -1630,7 +1607,7 @@ https://www.google.com | Google
             getShardings(function (items) {
                 collectBackupSettings(function (settings) {
                     let backup = buildBackupObject(items, undefined, settings);
-                    downloadTextFile("NJ-Tab-Backup-" + formatBackupTimestamp(new Date()) + ".json", JSON.stringify(backup, null, 2), "application/json");
+                    downloadTextFile("NJ-Tab-Backup-" + formatBackupTimestamp(new Date()) + ".json", JSON.stringify(backup), "application/json"); // 4.6.3 需求十三：与 WebDAV 统一改紧凑写法，不再缩进排版
                     // 4.5 需求七：导出备份也要写日志，带组数/条数/回收站组数条数
                     let expMainTabs = 0;
                     backup.tabGroups.forEach(function (g) { expMainTabs += (g.tabs || []).length; });
@@ -1642,11 +1619,40 @@ https://www.google.com | Google
         });
 
         // 从备份文件导入：严格校验通过才写数据；追加合并，不覆盖现有标签，备份里的原始字段（含 date）原样并入，不走 makeTabGroup 重建
+        // 4.6 急修六改版：点「导入完整备份」选好文件后只暂存、显示文件名并亮出「确认导入」按钮；
+        // 点确认导入后要过两次确认（先问是否导入这个文件、再带数量确认）才真正导入；成功后清掉文件名与按钮。
+        let njPendingImportFile = null;
+        function njClearPendingImport() {
+            njPendingImportFile = null;
+            let nameEl = document.getElementById('importBackupFileName');
+            if (nameEl) {
+                nameEl.textContent = "";
+            }
+            let btnEl = document.getElementById('importBackupConfirmBtn');
+            if (btnEl) {
+                btnEl.classList.add('hide');
+            }
+        }
         document.getElementById('importBackupFile').addEventListener('change', function (event) {
             let file = event.target.files && event.target.files[0];
-            if (!file) {
+            njPendingImportFile = file || null;
+            let nameEl = document.getElementById('importBackupFileName');
+            if (nameEl) {
+                nameEl.textContent = file ? file.name : "";
+            }
+            let btnEl = document.getElementById('importBackupConfirmBtn');
+            if (btnEl) {
+                btnEl.classList.toggle('hide', !file);
+            }
+            event.target.value = "";
+        });
+
+        document.getElementById('importBackupConfirmBtn').addEventListener('click', function () {
+            if (!njPendingImportFile) {
                 return;
             }
+            // 4.6.3.2 按南极口径改：点「确认导入」直接读文件解析，全程只有一个框——解析完用「2 次确认」框（一个框两步、输 Y 生效）亮出内容构成
+            let file = njPendingImportFile;
             let reader = new FileReader();
             reader.onload = function () {
                 let backup;
@@ -1654,105 +1660,44 @@ https://www.google.com | Google
                     backup = JSON.parse(reader.result);
                 } catch (e) {
                     njLogEvent("importBackup", false, "文件读不出来（不是有效的备份文件）");
-                    alert(`${chrome.i18n.getMessage("backupInvalid")}`);
-                    event.target.value = "";
+                    njAlert(chrome.i18n.getMessage("backupInvalid"));
+                    njClearPendingImport();
                     return;
                 }
-                // 4.3 需求十四：逐条宽容清洗——结构性问题才整份拒绝；单条坏数据跳过并逐条记日志，不再整份报废
+                // 4.6.3 需求十四：整份结构校验——结构不对（不是备份文件）整份拒绝；通过后整份直接覆盖，不清洗、不去重，坏条目原样还原
                 let check = sanitizeBackupObject(backup);
                 if (check.fatal) {
                     njLogEvent("importBackup", false, njReasonText(check.fatal));
-                    alert(`${chrome.i18n.getMessage("backupInvalid")}`);
-                    event.target.value = "";
+                    njAlert(chrome.i18n.getMessage("backupInvalid"));
+                    njClearPendingImport();
                     return;
                 }
-                if (check.skipped.length > 0) {
-                    // 跳过明细汇总成一条日志、逐条放进详情（审查第四项：不再一条坏数据刷一条、还翻不全）
-                    njLogEvent("importBackup", false, "共跳过 " + check.skipped.length + " 条，明细点开看", check.skipped.map(function (s) { return njSkippedDetail(s); }));
-                }
-                let skippedNote = check.skipped.length > 0 ? `\n${check.skipped.length}${chrome.i18n.getMessage("backupImportSkipped")}` : "";
-                let tabCount = 0;
-                for (let i = 0; i < check.tabGroups.length; i++) {
-                    tabCount += check.tabGroups[i].tabs.length;
-                }
-                if (!confirm(`${chrome.i18n.getMessage("backupImportConfirm")}（${check.tabGroups.length}${chrome.i18n.getMessage("group")} / ${tabCount}${chrome.i18n.getMessage("totals")}）${skippedNote}`)) {
-                    event.target.value = "";
-                    return;
-                }
-                getShardings(function (items) {
-                    // 4.4 需求八：追加合并前逐条去重——主列表对主列表、回收站对回收站，跨组也算；
-                    // 整组都被去重掉的组不再追加（不留空组），原有数据一条不动
-                    let mainSet = njBuildDupSet(items.tabGroups);
-                    let dupSkipped = 0;
-                    let keptMain = [];
-                    check.tabGroups.forEach(function (g) {
-                        let f = njFilterDupTabs(g.tabs, mainSet);
-                        dupSkipped += f.dupCount;
-                        if (f.kept.length > 0) {
-                            g.tabs = f.kept;
-                            keptMain.push(g);
-                        }
-                    });
-                    // 4.5 需求八：不再一律追加末尾——按组时间把导入组插进现有组之间（新在前），现有组顺序不动
-                    let merged = njMergeGroupsByTime(items.tabGroups, keptMain);
-                    saveShardings(merged, "object");
-                    let keptDel = [];
-                    if (check.delTabGroups.length > 0) {
-                        let delSet = njBuildDupSet(items.delTabGroups);
-                        check.delTabGroups.forEach(function (g) {
-                            let f = njFilterDupTabs(g.tabs, delSet);
-                            dupSkipped += f.dupCount;
-                            if (f.kept.length > 0) {
-                                g.tabs = f.kept;
-                                keptDel.push(g);
-                            }
-                        });
-                        if (keptDel.length > 0) {
-                            let mergedDel = njMergeGroupsByTime(items.delTabGroups, keptDel);
-                            saveShardings(mergedDel, "del");
-                        }
-                    }
-                    let settingsRestored = applyBackupSettings(backup.settings);
-                    let dupNote = dupSkipped > 0 ? `\n${dupSkipped}${chrome.i18n.getMessage("dedupSkipped")}` : "";
-                    // 4.5 需求九：导入日志补上条数（主列表多少条、回收站多少条，去重后实际并入的数量）
-                    let keptMainTabs = 0;
-                    keptMain.forEach(function (g) { keptMainTabs += (g.tabs || []).length; });
-                    let keptDelTabs = 0;
-                    keptDel.forEach(function (g) { keptDelTabs += (g.tabs || []).length; });
-                    njLogEvent("importBackup", true, "导入 " + keptMain.length + " 组 / " + keptMainTabs + " 条" + (keptDel.length > 0 ? "、回收站 " + keptDel.length + " 组 / " + keptDelTabs + " 条" : "") + (check.skipped.length > 0 ? "，跳过 " + check.skipped.length + " 条" : "") + (dupSkipped > 0 ? "，去重跳过 " + dupSkipped + " 条" : ""));
-                    if (settingsRestored) {
-                        alert(`${chrome.i18n.getMessage("backupImportSuccess")}${chrome.i18n.getMessage("settingsAlsoRestored")}${skippedNote}${dupNote}`);
-                    } else {
-                        alert(`${chrome.i18n.getMessage("backupImportSuccess")}${skippedNote}${dupNote}`);
-                    }
-                    setTimeout(refresh, 300);
-                });
-                event.target.value = "";
+                let rawMain = Array.isArray(backup.tabGroups) ? backup.tabGroups : [];
+                let rawDel = Array.isArray(backup.delTabGroups) ? backup.delTabGroups : [];
+                let mainTabs = 0; rawMain.forEach(function (g) { mainTabs += ((g && g.tabs) || []).length; });
+                let delTabs = 0; rawDel.forEach(function (g) { delTabs += ((g && g.tabs) || []).length; });
+                // 一个框两步确认：写明内容构成（主页 + 回收站都写），输 Y 才执行
+                showDoubleConfirmation(`${chrome.i18n.getMessage("importBackupFile")}`, `${chrome.i18n.getMessage("backupImportConfirm")}<br>本地文件 ${escapeHtml(file.name)}：主页 ${rawMain.length} 组 / ${mainTabs} 条、回收站 ${rawDel.length} 组 / ${delTabs} 条`, function () {
+                    saveShardings(rawMain, "object");
+                    saveShardings(rawDel, "del");
+                    applyBackupSettings(backup.settings);
+                    // 需求十八：每次导入只写一条日志，标题只写状态，详情把主页与回收站的组数条数分开写清
+                    njLogEvent("importBackup", true, "导入 " + rawMain.length + " 组 / " + mainTabs + " 条、回收站 " + rawDel.length + " 组 / " + delTabs + " 条");
+                    // 4.6.5-5 审核意见补修（南极 2026-11-22）：成功提示只写导入成功，不再拼「页面将刷新」「配置也已一并恢复」
+                    let njSuccessMsg = `${chrome.i18n.getMessage("backupImportSuccess")}`;
+                    njClearPendingImport();
+                    njAlert(njSuccessMsg, null, 6000);
+                    njRenderListWhenIdle();
+                }, function () { njClearPendingImport(); });
             };
             reader.onerror = function () {
-                alert(`${chrome.i18n.getMessage("backupInvalid")}`);
-                event.target.value = "";
+                njAlert(chrome.i18n.getMessage("backupInvalid"));
+                njClearPendingImport();
             };
             reader.readAsText(file);
         });
 
-        // 选好备份文件后把文件名显示在按钮旁边（按钮已换成与其它按钮一致的样式，4.4 需求十三）
-        document.getElementById('importBackupFile').addEventListener('change', function (event) {
-            let nameEl = document.getElementById('importBackupFileName');
-            if (nameEl) {
-                nameEl.textContent = (event.target.files && event.target.files[0]) ? event.target.files[0].name : "";
-                try { sessionStorage.setItem('njLastImportFileName', nameEl.textContent); } catch (e) {}
-            }
-        });
-
-        // 导入成功后页面会整页刷新，这里把刷新前选好的文件名恢复显示（4.5.1 修复）
-        try {
-            let savedImportName = sessionStorage.getItem('njLastImportFileName');
-            let importNameEl = document.getElementById('importBackupFileName');
-            if (savedImportName && importNameEl && !importNameEl.textContent) {
-                importNameEl.textContent = savedImportName;
-            }
-        } catch (e) {}
+        // （4.6 改版：文件名只在本次页面显示，导入成功即清掉，不再跨刷新保留——原 4.5.1 的 sessionStorage 恢复逻辑已删）
 
         // 持续监听通知框的按钮点击事件，点了就清除通知框
         chrome.notifications.onButtonClicked.addListener(function callback(notificationId, buttonIndex) {
@@ -1825,6 +1770,12 @@ https://www.google.com | Google
             }
         });
 
+        // 4.6.4 需求四：右下角双箭头——上箭头回顶部、下箭头去底部
+        let njST = document.getElementById("njScrollTopBtn");
+        if (njST) { njST.addEventListener("click", function () { window.scrollTo({top: 0, behavior: "smooth"}); }); }
+        let njSB = document.getElementById("njScrollBottomBtn");
+        if (njSB) { njSB.addEventListener("click", function () { window.scrollTo({top: document.documentElement.scrollHeight, behavior: "smooth"}); }); }
+
         // 监听 hash 的变化事件
         window.addEventListener("hashchange", function () {
             // 获取当前 hash
@@ -1841,6 +1792,11 @@ https://www.google.com | Google
             if (njTotalsEl && currentHash) {
                 // 4.4 需求十一：隐藏时只让文字不可见、保留它占的位置，下面的菜单（查看日志等）位置不再上下跳动
                 njTotalsEl.style.visibility = ["#options", "#gist", "#webdav", "#importExport", "#importOnetab", "#importDefault", "#export", "#search"].indexOf(currentHash) >= 0 ? "hidden" : "";
+            }
+            // 4.6.4 需求四：右下角上下箭头只出现在首页、搜索页、日志页、回收站页，其他页面不显示
+            let njScrollBtnsEl = document.getElementById("njScrollBtns");
+            if (njScrollBtnsEl && currentHash) {
+                njScrollBtnsEl.style.display = ["#home", "#search", "#logs", "#baks"].indexOf(currentHash) >= 0 ? "" : "none";
             }
             // 搜索页默认隐藏，只有 #search 路由会显示它（showSearchPage 里去掉 hide）；
             // 路由清空 hash 触发的那次空 hashchange 不能隐藏它，故只在真实导航到别的页时才藏
@@ -1866,7 +1822,7 @@ https://www.google.com | Google
                     $("#importOneTab").addClass("hide")
                     $("#tabGroupsBak").addClass("hide")
                     $("#importDefault").addClass("hide")
-                    $("#exportDefault").addClass("hide")
+                    $("#exportDefault").addClass("hide"); $("#njExportFiles").addClass("hide"); $("#njImportBackup").addClass("hide")
                     $("#searchArea").removeClass("hide");
                     $("#tabGroups").removeClass("hide");
                     // 展示所有标签
@@ -1884,7 +1840,7 @@ https://www.google.com | Google
                     $("#webdavPage").addClass("hide")
                     $("#importOneTab").addClass("hide")
                     $("#importDefault").addClass("hide")
-                    $("#exportDefault").addClass("hide")
+                    $("#exportDefault").addClass("hide"); $("#njExportFiles").addClass("hide"); $("#njImportBackup").addClass("hide")
                     // 4.3 需求六：旧的过程日志 Mithril 区不再单独显示——过程日志已并入新四分区面板的 Gist 区
                     $("#logs").addClass("hide")
                     $("#njLogsPanel").removeClass("hide");
@@ -1901,7 +1857,7 @@ https://www.google.com | Google
                     $("#tabGroupsBak").addClass("hide");
                     $("#importOneTab").addClass("hide")
                     $("#importDefault").addClass("hide")
-                    $("#exportDefault").addClass("hide")
+                    $("#exportDefault").addClass("hide"); $("#njExportFiles").addClass("hide"); $("#njImportBackup").addClass("hide")
                     $("#options").removeClass("hide");
                     // 展示配置
                     showOptions();
@@ -1916,7 +1872,7 @@ https://www.google.com | Google
                     $("#tabGroupsBak").addClass("hide");
                     $("#options").addClass("hide");
                     $("#importDefault").removeClass("hide")
-                    $("#exportDefault").removeClass("hide")
+                    $("#exportDefault").removeClass("hide"); $("#njExportFiles").removeClass("hide"); $("#njImportBackup").removeClass("hide")
                     $("#importOneTab").removeClass("hide")
                     break;
                 case "#importDefault": //打开 导入默认格式的url功能（4.2 起与导入/导出合并为一页）
@@ -1929,7 +1885,7 @@ https://www.google.com | Google
                     $("#tabGroupsBak").addClass("hide");
                     $("#options").addClass("hide");
                     $("#importOneTab").removeClass("hide")
-                    $("#exportDefault").removeClass("hide")
+                    $("#exportDefault").removeClass("hide"); $("#njExportFiles").removeClass("hide"); $("#njImportBackup").removeClass("hide")
                     $("#importDefault").removeClass("hide")
                     break;
                 case "#export": //打开 导出默认格式的url功能（4.2 起与导入/导出合并为一页）
@@ -1943,7 +1899,7 @@ https://www.google.com | Google
                     $("#options").addClass("hide");
                     $("#importOneTab").removeClass("hide")
                     $("#importDefault").removeClass("hide")
-                    $("#exportDefault").removeClass("hide")
+                    $("#exportDefault").removeClass("hide"); $("#njExportFiles").removeClass("hide"); $("#njImportBackup").removeClass("hide")
                     $('#exportTextarea').val("");
                     break;
                 case "#gist": //打开 Gist 备份页
@@ -1956,7 +1912,7 @@ https://www.google.com | Google
                     $("#webdavPage").addClass("hide");
                     $("#importOneTab").addClass("hide")
                     $("#importDefault").addClass("hide")
-                    $("#exportDefault").addClass("hide")
+                    $("#exportDefault").addClass("hide"); $("#njExportFiles").addClass("hide"); $("#njImportBackup").addClass("hide")
                     $("#gistPage").removeClass("hide");
                     // 展示 Gist 备份页
                     showGistPage();
@@ -1971,7 +1927,7 @@ https://www.google.com | Google
                     $("#gistPage").addClass("hide");
                     $("#importOneTab").addClass("hide")
                     $("#importDefault").addClass("hide")
-                    $("#exportDefault").addClass("hide")
+                    $("#exportDefault").addClass("hide"); $("#njExportFiles").addClass("hide"); $("#njImportBackup").addClass("hide")
                     $("#webdavPage").removeClass("hide");
                     // 展示 WebDAV 页
                     showWebdavPage();
@@ -1987,7 +1943,7 @@ https://www.google.com | Google
                     $("#webdavPage").addClass("hide");
                     $("#importOneTab").removeClass("hide")
                     $("#importDefault").removeClass("hide")
-                    $("#exportDefault").removeClass("hide")
+                    $("#exportDefault").removeClass("hide"); $("#njExportFiles").removeClass("hide"); $("#njImportBackup").removeClass("hide")
                     $('#exportTextarea').val("");
                     break;
                 case "#baks": //打开 回收站
@@ -2000,6 +1956,68 @@ https://www.google.com | Google
     });
 
     // 从github的gist拉取
+    // 4.6.3 需求二：手动推送/拉取完成后的页面内结果弹框（代替系统通知）：成功绿、失败红、取消灰，6 秒自动关、点一下也可关
+    // 4.6.5：Gist 状态码人话原因（页面侧，与后台 njHttpText 同一张表）：手动推送/拉取失败时日志与弹框都写这个，不再写原始英文回执
+    function njGistHttpText(status) {
+        if (!status) { return "网络出错（连不上或超时）"; }
+        let table = {
+            401: "令牌无效或已过期",
+            403: "权限不足或被拒绝（也可能是触发限流）",
+            404: "找不到这个 Gist（可能已被删除）",
+            422: "请求内容有问题",
+            429: "请求太频繁，被服务器限流，请稍后再试"
+        };
+        let r = table[status] || (status >= 500 ? "对方服务器出错" : "");
+        return "HTTP " + status + (r ? "：" + r : "");
+    }
+
+    // 从过程日志里提取失败原因（步骤行形如「拉取失败：HTTP 401：令牌无效或已过期」），给结果弹框带上明确错误
+    function njGistFailReason() {
+        for (let i = 0; i < handleGistLog.length; i++) {
+            let m = String(handleGistLog[i]).match(/(?:失败|failed)[:：]\s*(.+)$/i);
+            if (m) { return m[1]; }
+        }
+        return "";
+    }
+
+    // 4.6.5：「列出全部 Gist」这一步失败时的统一收尾——按动作写失败日志并清状态，
+    // 监视器随即弹唯一的红色结果框（不再先弹旧报错框、也不再卡到 30 秒超时才出第二个框）
+    function njGistFailAtList(action, reasonText) {
+        let isPush = action.indexOf("push") === 0;
+        let plat = action.indexOf("gitee") !== -1 ? "Gitee" : "GitHub";
+        njLogEvent(isPush ? "gistPush" : "gistPull", false, plat + (reasonText ? " " + reasonText : ""));
+        if (action === "push_github") { pushToGithubGistStatus = undefined; }
+        if (action === "pull_github") { pullFromGithubGistStatus = undefined; }
+        if (action === "push_gitee") { pushToGiteeGistStatus = undefined; }
+        if (action === "pull_gitee") { pullFromGiteeGistStatus = undefined; }
+    }
+
+    function njGistResultToast(kind, titleText, reasonText) {
+        let toast = document.getElementById("njGistToast");
+        if (!toast) {
+            toast = document.createElement("div");
+            toast.id = "njGistToast";
+            toast.style.cssText = "position:fixed;top:66px;left:50%;transform:translateX(-50%);z-index:3000;padding:10px 22px;border-radius:6px;font-size:15px;display:none;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.25);";
+            toast.addEventListener("click", function () { toast.style.display = "none"; });
+            document.body.appendChild(toast);
+        }
+        let word = kind === "success" ? chrome.i18n.getMessage("njResultSuccess") : (kind === "cancel" ? chrome.i18n.getMessage("njResultCanceled") : chrome.i18n.getMessage("njResultFailed"));
+        toast.textContent = titleText + "：" + word + (reasonText ? "（" + reasonText + "）" : "");
+        toast.style.background = kind === "success" ? "#2e7d32" : (kind === "cancel" ? "#616161" : "#c62828");
+        toast.style.color = "#fff";
+        toast.style.display = "block";
+        clearTimeout(njGistResultToast._t);
+        njGistResultToast._t = setTimeout(function () { toast.style.display = "none"; }, 6000);
+    }
+
+    // 从过程日志判断结果：有成功字样且没有失败字样算成功；带「已取消」算取消；其余算失败
+    function njGistLogResult() {
+        let joined = handleGistLog.join("\n");
+        if (/已?取消|Cancel(l)?ed/i.test(joined)) { return "cancel"; }
+        if (/成功|success/i.test(joined) && !/失败|fail/i.test(joined)) { return "success"; }
+        return "fail";
+    }
+
     function pullFromGithubGist() {
         startTime = moment();
         setHandleGistStatus(`${chrome.i18n.getMessage("pullFromGithubGistIng")}`, "github");
@@ -2013,28 +2031,23 @@ https://www.google.com | Google
         handleGistLog.push(`${chrome.i18n.getMessage("startPullFromGithubGistTask")}`)
         if (typeof (pullFromGithubGistStatus) != "undefined") {
             console.log("开始工作");
-            intervalId = setInterval(function () {
+            let njFinalized = false;
+            let njWatchTimer = setInterval(function () {
                 if (typeof (pullFromGithubGistStatus) != "undefined") {
                     console.log("秒等待");
                     usedSeconds++;
                 } else {
-                    clearInterval(intervalId);
+                    clearInterval(njWatchTimer);
+                    if (njFinalized) { return; }
+                    njFinalized = true;
                     endTime = moment();
                     const duration = moment.duration(moment(endTime).diff(moment(startTime)));
-                    notificationId = genObjectId();
-                    chrome.notifications.create(notificationId, {
-                        type: 'basic',
-                        iconUrl: 'images/128.png',
-                        title: `${chrome.i18n.getMessage("endPullFromGithubGistTask")}`,
-                        message: `${chrome.i18n.getMessage("usedTime")}${duration.hours()}${chrome.i18n.getMessage("hours")}${duration.minutes()}${chrome.i18n.getMessage("minutes")}${duration.seconds()}${chrome.i18n.getMessage("seconds")}`,
-                        buttons: [{"title": `${chrome.i18n.getMessage("close")}`}],
-                        requireInteraction: true
-                    });
+                    njGistResultToast(njGistLogResult(), chrome.i18n.getMessage("endPullFromGithubGistTask"), njGistLogResult() === "fail" ? njGistFailReason() : "");
                     handleGistLog.push(`${usedSeconds}${chrome.i18n.getMessage("secondWait")}`)
                     handleGistLog.push(`${chrome.i18n.getMessage("endPullFromGithubGistTask")}`)
                     handleGistLog.push(`${chrome.i18n.getMessage("end")}${moment().format('YYYY-MM-DD HH:mm:ss')}`);
                     setHandleGistStatus("IDLE", "github");
-                    setHandleGistLog(`${chrome.i18n.getMessage("clickPullGithub")}`, true);
+                    setHandleGistLog(`${chrome.i18n.getMessage("clickPullGithub")}`, false);
                     console.log("pull从github的gist的任务完成");
                 }
             }, 1000);
@@ -2056,28 +2069,23 @@ https://www.google.com | Google
         handleGistLog.push(`${chrome.i18n.getMessage("startPullFromGiteeGistTask")}`)
         if (typeof (pullFromGiteeGistStatus) != "undefined") {
             console.log("开始工作");
-            intervalId = setInterval(function () {
+            let njFinalized = false;
+            let njWatchTimer = setInterval(function () {
                 if (typeof (pullFromGiteeGistStatus) != "undefined") {
                     console.log("秒等待");
                     usedSeconds++;
                 } else {
-                    clearInterval(intervalId);
+                    clearInterval(njWatchTimer);
+                    if (njFinalized) { return; }
+                    njFinalized = true;
                     endTime = moment();
                     const duration = moment.duration(moment(endTime).diff(moment(startTime)));
-                    notificationId = genObjectId();
-                    chrome.notifications.create(notificationId, {
-                        type: 'basic',
-                        iconUrl: 'images/128.png',
-                        title: `${chrome.i18n.getMessage("endPullFromGiteeGistTask")}`,
-                        message: `${chrome.i18n.getMessage("usedTime")}${duration.hours()}${chrome.i18n.getMessage("hours")}${duration.minutes()}${chrome.i18n.getMessage("minutes")}${duration.seconds()}${chrome.i18n.getMessage("seconds")}`,
-                        buttons: [{"title": `${chrome.i18n.getMessage("close")}`}],
-                        requireInteraction: true
-                    });
+                    njGistResultToast(njGistLogResult(), chrome.i18n.getMessage("endPullFromGiteeGistTask"), njGistLogResult() === "fail" ? njGistFailReason() : "");
                     handleGistLog.push(`${usedSeconds}${chrome.i18n.getMessage("secondWait")}`)
                     handleGistLog.push(`${chrome.i18n.getMessage("endPullFromGiteeGistTask")}`)
                     handleGistLog.push(`${chrome.i18n.getMessage("end")}${moment().format('YYYY-MM-DD HH:mm:ss')}`);
                     setHandleGistStatus("IDLE", "gitee");
-                    setHandleGistLog(`${chrome.i18n.getMessage("clickPullGitee")}`, true);
+                    setHandleGistLog(`${chrome.i18n.getMessage("clickPullGitee")}`, false);
                     console.log("pull从gitee的gist的任务完成");
                 }
             }, 1000);
@@ -2100,23 +2108,23 @@ https://www.google.com | Google
         handleGistLog.push(`${chrome.i18n.getMessage("startPushToGithubGistTask")}`)
         if (typeof (pushToGithubGistStatus) != "undefined") {
             console.log("开始工作");
-            intervalId = setInterval(function () {
+            let njFinalized = false;
+            let njTimeoutShown = false;
+            let njWatchTimer = setInterval(function () {
                 if (typeof (pushToGithubGistStatus) != "undefined") {
                     console.log("秒等待");
                     usedSeconds++;
+                    if (usedSeconds >= 30 && !njTimeoutShown) {
+                        njTimeoutShown = true;
+                        njGistResultToast("fail", chrome.i18n.getMessage("endPushToGithubGistTask") + "（" + chrome.i18n.getMessage("njResultTimeout") + "）");
+                    }
                 } else {
-                    clearInterval(intervalId);
+                    clearInterval(njWatchTimer);
+                    if (njFinalized) { return; }
+                    njFinalized = true;
                     endTime = moment();
                     const duration = moment.duration(moment(endTime).diff(moment(startTime)));
-                    notificationId = genObjectId();
-                    chrome.notifications.create(notificationId, {
-                        type: 'basic',
-                        iconUrl: 'images/128.png',
-                        title: `${chrome.i18n.getMessage("endPushToGithubGistTask")}`,
-                        message: `${chrome.i18n.getMessage("usedTime")}${duration.hours()}${chrome.i18n.getMessage("hours")}${duration.minutes()}${chrome.i18n.getMessage("minutes")}${duration.seconds()}${chrome.i18n.getMessage("seconds")}`,
-                        buttons: [{"title": `${chrome.i18n.getMessage("close")}`}],
-                        requireInteraction: true
-                    });
+                    if (!njTimeoutShown) { njGistResultToast(njGistLogResult(), chrome.i18n.getMessage("endPushToGithubGistTask"), njGistLogResult() === "fail" ? njGistFailReason() : ""); }
                     handleGistLog.push(`${usedSeconds}${chrome.i18n.getMessage("secondWait")}`)
                     handleGistLog.push(`${chrome.i18n.getMessage("endPushToGithubGistTask")}`)
                     handleGistLog.push(`${chrome.i18n.getMessage("end")}${moment().format('YYYY-MM-DD HH:mm:ss')}`);
@@ -2144,23 +2152,23 @@ https://www.google.com | Google
         handleGistLog.push(`${chrome.i18n.getMessage("startPushToGiteeGistTask")}`)
         if (typeof (pushToGiteeGistStatus) != "undefined") {
             console.log("开始工作");
-            intervalId = setInterval(function () {
+            let njFinalized = false;
+            let njTimeoutShown = false;
+            let njWatchTimer = setInterval(function () {
                 if (typeof (pushToGiteeGistStatus) != "undefined") {
                     console.log("秒等待");
                     usedSeconds++;
+                    if (usedSeconds >= 30 && !njTimeoutShown) {
+                        njTimeoutShown = true;
+                        njGistResultToast("fail", chrome.i18n.getMessage("endPushToGiteeGistTask") + "（" + chrome.i18n.getMessage("njResultTimeout") + "）");
+                    }
                 } else {
-                    clearInterval(intervalId);
+                    clearInterval(njWatchTimer);
+                    if (njFinalized) { return; }
+                    njFinalized = true;
                     endTime = moment();
                     const duration = moment.duration(moment(endTime).diff(moment(startTime)));
-                    notificationId = genObjectId();
-                    chrome.notifications.create(notificationId, {
-                        type: 'basic',
-                        iconUrl: 'images/128.png',
-                        title: `${chrome.i18n.getMessage("endPushToGiteeGistTask")}`,
-                        message: `${chrome.i18n.getMessage("usedTime")}${duration.hours()}${chrome.i18n.getMessage("hours")}${duration.minutes()}${chrome.i18n.getMessage("minutes")}${duration.seconds()}${chrome.i18n.getMessage("seconds")}`,
-                        buttons: [{"title": `${chrome.i18n.getMessage("close")}`}],
-                        requireInteraction: true
-                    });
+                    if (!njTimeoutShown) { njGistResultToast(njGistLogResult(), chrome.i18n.getMessage("endPushToGiteeGistTask"), njGistLogResult() === "fail" ? njGistFailReason() : ""); }
                     handleGistLog.push(`${usedSeconds}${chrome.i18n.getMessage("secondWait")}`)
                     handleGistLog.push(`${chrome.i18n.getMessage("endPushToGiteeGistTask")}`)
                     handleGistLog.push(`${chrome.i18n.getMessage("end")}${moment().format('YYYY-MM-DD HH:mm:ss')}`);
@@ -2174,37 +2182,41 @@ https://www.google.com | Google
     }
 
     // 构造操作gist的日志结构
+    // 4.6.6 审核补修：页面侧过程日志落盘同样排队串行（与后台同一病根：读整表、插最前、存整表会互覆）
+    let njGistLogQueue = [];
+    let njGistLogWriting = false;
     function setHandleGistLog(type, isReload) {
         // 补上时间和成败（审查第二项）：日志页 Gist 区的行标题要和其它区一样有时间和结果；
         // 成败按步骤里有没有「失败」字样判定（步骤是当时语言的现成文案，中英文都覆盖）
-        let gistOk = !handleGistLog.some(function (line) { return /失败|Failed|failed/.test(String(line)); });
-        let handleGistLogMap = {id: genObjectId(), t: Date.now(), ok: gistOk, handleGistType: type, handleGistLogs: handleGistLog};
+        let gistOk = handleGistLog.some(function (line) { return /已取消|Canceled|Cancelled/.test(String(line)); })
+            ? "cancel"
+            : !handleGistLog.some(function (line) { return /失败|Failed|failed/.test(String(line)); });
+        njGistLogQueue.push({map: {id: genObjectId(), t: Date.now(), ok: gistOk, handleGistType: type, handleGistLogs: handleGistLog.slice()}, isReload: isReload});
+        njPumpGistLogQueue();
+    }
+    function njPumpGistLogQueue() {
+        if (njGistLogWriting) { return; }
+        let job = njGistLogQueue.shift();
+        if (!job) { return; }
+        njGistLogWriting = true;
         chrome.storage.local.get(null, function (storage) {
+            let newArr;
             if (storage.gistLog) {
-                console.log("gistLog有值");
-                if (storage.gistLog.length >= 100) {
-                    let newArr = storage.gistLog;
+                newArr = storage.gistLog;
+                if (newArr.length >= 100) {
                     newArr.splice(-1, 1)
-                    newArr.unshift(handleGistLogMap);
-                    chrome.storage.local.set({gistLog: newArr});
-                    if (isReload) {
-                        refresh()
-                    }
-                } else {
-                    let newArr = storage.gistLog;
-                    newArr.unshift(handleGistLogMap);
-                    chrome.storage.local.set({gistLog: newArr});
-                    if (isReload) {
-                        refresh()
-                    }
                 }
+                newArr.unshift(job.map);
             } else {
-                console.log("gistLog没有值，第一次");
-                chrome.storage.local.set({gistLog: [handleGistLogMap]});
-                if (isReload) {
+                newArr = [job.map];
+            }
+            chrome.storage.local.set({gistLog: newArr}, function () {
+                njGistLogWriting = false;
+                if (job.isReload) {
                     refresh()
                 }
-            }
+                njPumpGistLogQueue();
+            });
         });
     }
 
@@ -2265,15 +2277,15 @@ https://www.google.com | Google
                 }
             },
             error: function (xhr, errorText, errorType) {
-                console.log(xhr);
+                console.log(xhr && xhr.status);
                 console.log(errorText);
                 console.log(errorType);
                 console.log("报错了！");
-                handleGistLog.push(`${chrome.i18n.getMessage("updateFailed")}-->${xhr.responseText}`)
+                handleGistLog.push(`${chrome.i18n.getMessage("updateFailed")}：${njGistHttpText(xhr.status)}`)
                     if (xhr.status === 403 || xhr.status === 429) {
-                        njLogEvent("gistRateLimited", false, "GitHub HTTP " + xhr.status);
+                        njLogEvent("gistRateLimited", false, "GitHub " + njGistHttpText(xhr.status));
                     } else {
-                        njLogEvent("gistPush", false, "GitHub HTTP " + xhr.status);
+                        njLogEvent("gistPush", false, "GitHub " + njGistHttpText(xhr.status));
                     }
             },
             complete: function () {
@@ -2310,15 +2322,15 @@ https://www.google.com | Google
                 }
             },
             error: function (xhr, errorText, errorType) {
-                console.log(xhr);
+                console.log(xhr && xhr.status);
                 console.log(errorText);
                 console.log(errorType);
                 console.log("报错了！");
-                handleGistLog.push(`${chrome.i18n.getMessage("updateFailed")}-->${xhr.responseText}`)
+                handleGistLog.push(`${chrome.i18n.getMessage("updateFailed")}：${njGistHttpText(xhr.status)}`)
                     if (xhr.status === 403 || xhr.status === 429) {
-                        njLogEvent("gistRateLimited", false, "Gitee HTTP " + xhr.status);
+                        njLogEvent("gistRateLimited", false, "Gitee " + njGistHttpText(xhr.status));
                     } else {
-                        njLogEvent("gistPush", false, "Gitee HTTP " + xhr.status);
+                        njLogEvent("gistPush", false, "Gitee " + njGistHttpText(xhr.status));
                     }
             },
             complete: function () {
@@ -2431,6 +2443,33 @@ https://www.google.com | Google
     }
 
     // 通过gistId获取github gist
+    // 4.6.3 需求十四：Gist 拉取改「先下载、后确认」——内容下载解析完，先把内容构成亮出来，两次确认后才整份覆盖；取消则收尾（状态清掉、日志记已取消）
+    function njGistPullGate(provider, content, applyFn) {
+        // 4.6.5 审查补修：远端内容解析出 null/非对象时按失败收尾，否则下面读 content.tabGroups 会抛错、拉取状态永远清不掉
+        if (!content || typeof content !== "object") {
+            handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}：备份内容无效`);
+            njLogEvent("gistPull", false, (provider === "github" ? "GitHub" : "Gitee") + " 备份内容无效");
+            if (provider === "github") { pullFromGithubGistStatus = undefined; } else { pullFromGiteeGistStatus = undefined; }
+            return;
+        }
+        let main = Array.isArray(content.tabGroups) ? content.tabGroups : [];
+        let del = Array.isArray(content.delTabGroups) ? content.delTabGroups : [];
+        // 4.6.4.1 审查修复：把规范化后的数组写回，applyFn 保存时不会拿到 undefined
+        content.tabGroups = main;
+        content.delTabGroups = del;
+        let mt = 0; main.forEach(function (g) { mt += ((g && g.tabs) || []).length; });
+        let dt = 0; del.forEach(function (g) { dt += ((g && g.tabs) || []).length; });
+        let counts = "远端 Gist：主页 " + main.length + " 组 / " + mt + " 条、回收站 " + del.length + " 组 / " + dt + " 条";
+        let title = chrome.i18n.getMessage(provider === "github" ? "pullFromGithubGist" : "pullFromGiteeGist");
+        let msg = chrome.i18n.getMessage("gistPullOverwriteWarn") + "<br>" + counts;
+        function cancel() {
+            handleGistLog.push("已取消拉取");
+            if (provider === "github") { pullFromGithubGistStatus = undefined; } else { pullFromGiteeGistStatus = undefined; }
+        }
+        // 南极口径：「2 次确认」是一个框里走两步（先看清内容构成，再输 Y 才能执行），不是弹两个框
+        showDoubleConfirmation(title, msg, applyFn, cancel);
+    }
+
     function getGithubGistById() {
         console.log("根据gistId拉取gist");
         handleGistLog.push(`${chrome.i18n.getMessage("getGithubGistById")}`)
@@ -2442,9 +2481,10 @@ https://www.google.com | Google
             success: function (data, status) {
                 if (status === "success") {
                     // 新文件名优先；旧文件名是 3.1 的备份文件，正是一次性迁移要读到的数据
-                    let gistFile = data.files['NJ-Tab_Tabs.json'] || data.files['brower_Tabs.json'];
+                    let gistFile = (data.files || {})['NJ-Tab_Tabs.json'] || (data.files || {})['brower_Tabs.json'];
                     if (!gistFile) {
-                        handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}`)
+                        handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}：备份文件不存在`)
+                        njLogEvent("gistPull", false, "GitHub 备份文件不存在");
                         pullFromGithubGistStatus = undefined;
                         return;
                     }
@@ -2454,25 +2494,36 @@ https://www.google.com | Google
                         getGithubGistByRawUrl(rawUrl);
                     } else {
                         let content = gistFile.content
-                        let _content = JSON.parse(content)
-                        njFillTabAddTimes(_content.tabGroups);
-                        njFillTabAddTimes(_content.delTabGroups);
-                        saveShardings(_content.tabGroups, "object");
-                        saveShardings(_content.delTabGroups, "del");
-                        applyBackupSettings(_content.settings);
-                        njLogEvent("gistPull", true, "GitHub");
-                        handleGistLog.push(`${chrome.i18n.getMessage("pullSuccess")}`);
-                        pullFromGithubGistStatus = undefined;
+                        let _content;
+                        try { _content = JSON.parse(content); } catch (e) {
+                            // 4.6.4.1 审查修复：远端内容损坏时原先直接抛错、拉取状态不收尾会一直卡住
+                            // 4.6.5：不再单独弹「备份无效」旧框，统一走结果弹框并写明原因
+                            handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}：备份内容损坏或格式不对`)
+                            njLogEvent("gistPull", false, "GitHub 备份内容损坏或格式不对");
+                            pullFromGithubGistStatus = undefined;
+                            return;
+                        }
+                        njGistPullGate("github", _content, function () {
+                            njFillTabAddTimes(_content.tabGroups);
+                            njFillTabAddTimes(_content.delTabGroups);
+                            saveShardings(_content.tabGroups, "object");
+                            saveShardings(_content.delTabGroups, "del");
+                            applyBackupSettings(_content.settings);
+                            njLogEvent("gistPull", true, "GitHub");
+                            handleGistLog.push(`${chrome.i18n.getMessage("pullSuccess")}`);
+                            pullFromGithubGistStatus = undefined;
+                        });
                     }
                 } else {
-                    alert("根据 Gist ID 拉取 Gist 失败了");
                     handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}`)
+                    njLogEvent("gistPull", false, "GitHub");
                     pullFromGithubGistStatus = undefined;
                 }
             },
             error: function (xhr, errorText, errorType) {
-                alert("根据 Gist ID 拉取 Gist 报错了");
-                handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}-->${xhr.responseText}`)
+                // 4.6.5：不再单独弹旧报错框——统一走结果弹框；失败立刻收尾，日志写人话原因
+                handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}：${njGistHttpText(xhr.status)}`)
+                njLogEvent("gistPull", false, "GitHub " + njGistHttpText(xhr.status));
                 pullFromGithubGistStatus = undefined;
             },
             complete: function () {
@@ -2492,26 +2543,36 @@ https://www.google.com | Google
             url: rawUrl,
             success: function (data, status) {
                 if (status === "success") {
-                    let _content = JSON.parse(data)
-                    njFillTabAddTimes(_content.tabGroups);
-                    njFillTabAddTimes(_content.delTabGroups);
-                    saveShardings(_content.tabGroups, "object");
-                    saveShardings(_content.delTabGroups, "del");
-                    applyBackupSettings(_content.settings);
-                    njLogEvent("gistPull", true, "GitHub");
-                    handleGistLog.push(`${chrome.i18n.getMessage("pullSuccess")}`);
+                    let _content;
+                    try { _content = JSON.parse(data); } catch (e) {
+                        handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}：备份内容损坏或格式不对`)
+                        njLogEvent("gistPull", false, "GitHub 备份内容损坏或格式不对");
+                        pullFromGithubGistStatus = undefined;
+                        return;
+                    }
+                    njGistPullGate("github", _content, function () {
+                        njFillTabAddTimes(_content.tabGroups);
+                        njFillTabAddTimes(_content.delTabGroups);
+                        saveShardings(_content.tabGroups, "object");
+                        saveShardings(_content.delTabGroups, "del");
+                        applyBackupSettings(_content.settings);
+                        njLogEvent("gistPull", true, "GitHub");
+                        handleGistLog.push(`${chrome.i18n.getMessage("pullSuccess")}`);
+                        pullFromGithubGistStatus = undefined;
+                    });
                 } else {
-                    alert("根据 raw_url 拉取 Gist 失败了");
                     handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}`)
+                    njLogEvent("gistPull", false, "GitHub");
+                    pullFromGithubGistStatus = undefined;
                 }
             },
             error: function (xhr, errorText, errorType) {
-                alert("根据 raw_url 拉取 Gist 报错了");
-                handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}-->${xhr.responseText}`)
+                handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}：${njGistHttpText(xhr.status)}`)
+                njLogEvent("gistPull", false, "GitHub " + njGistHttpText(xhr.status));
+                pullFromGithubGistStatus = undefined;
             },
             complete: function () {
-                //do something
-                pullFromGithubGistStatus = undefined;
+                // 4.6.3：状态改由拉取防呆门在应用/取消时收尾，这里不再提前清
             }
         })
     }
@@ -2527,32 +2588,44 @@ https://www.google.com | Google
             url: giteeApiUrl + "/gists/" + giteeGistId,
             success: function (data, status) {
                 if (status === "success") {
-                    let gistFile = data.files['NJ-Tab_Tabs.json'] || data.files['brower_Tabs.json'];
+                    let gistFile = (data.files || {})['NJ-Tab_Tabs.json'] || (data.files || {})['brower_Tabs.json'];
                     if (!gistFile) {
-                        handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}`)
+                        handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}：备份文件不存在`)
+                        njLogEvent("gistPull", false, "Gitee 备份文件不存在");
                         pullFromGiteeGistStatus = undefined;
                         return;
                     }
                     let content = gistFile.content
-                    let _content = JSON.parse(content)
-                    njFillTabAddTimes(_content.tabGroups);
-                    njFillTabAddTimes(_content.delTabGroups);
-                    saveShardings(_content.tabGroups, "object");
-                    saveShardings(_content.delTabGroups, "del");
-                    applyBackupSettings(_content.settings);
-                    handleGistLog.push(`${chrome.i18n.getMessage("pullSuccess")}`)
+                    let _content;
+                    try { _content = JSON.parse(content); } catch (e) {
+                        handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}：备份内容损坏或格式不对`)
+                        njLogEvent("gistPull", false, "Gitee 备份内容损坏或格式不对");
+                        pullFromGiteeGistStatus = undefined;
+                        return;
+                    }
+                    njGistPullGate("gitee", _content, function () {
+                        njFillTabAddTimes(_content.tabGroups);
+                        njFillTabAddTimes(_content.delTabGroups);
+                        saveShardings(_content.tabGroups, "object");
+                        saveShardings(_content.delTabGroups, "del");
+                        applyBackupSettings(_content.settings);
+                        njLogEvent("gistPull", true, "Gitee");
+                        handleGistLog.push(`${chrome.i18n.getMessage("pullSuccess")}`);
+                        pullFromGiteeGistStatus = undefined;
+                    });
                 } else {
-                    alert("根据 Gist ID 拉取 Gist 失败了");
                     handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}`)
+                    njLogEvent("gistPull", false, "Gitee");
+                    pullFromGiteeGistStatus = undefined;
                 }
             },
             error: function (xhr, errorText, errorType) {
-                alert("根据 Gist ID 拉取 Gist 报错了");
-                handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}-->${xhr.responseText}`)
+                handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}：${njGistHttpText(xhr.status)}`)
+                njLogEvent("gistPull", false, "Gitee " + njGistHttpText(xhr.status));
+                pullFromGiteeGistStatus = undefined;
             },
             complete: function () {
-                //do something
-                pullFromGiteeGistStatus = undefined;
+                // 4.6.3：状态改由拉取防呆门在应用/取消时收尾，这里不再提前清
             }
         })
     }
@@ -2627,13 +2700,13 @@ https://www.google.com | Google
                         }
                     }
                 } else {
-                    alert("获取所有 Gist 时失败了");
                     handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}`)
+                    njGistFailAtList(action, "");
                 }
             },
             error: function (xhr, errorText, errorType) {
-                alert("获取所有 Gist 时报错了");
-                handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}-->${xhr.responseText}`)
+                handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}：${njGistHttpText(xhr.status)}`)
+                njGistFailAtList(action, njGistHttpText(xhr.status));
             },
             complete: function () {
                 //do something
@@ -2711,13 +2784,13 @@ https://www.google.com | Google
                         }
                     }
                 } else {
-                    alert("获取所有 Gist 时失败了");
                     handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}`)
+                    njGistFailAtList(action, "");
                 }
             },
             error: function (xhr, errorText, errorType) {
-                alert("获取所有 Gist 时报错了");
-                handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}-->${xhr.responseText}`)
+                handleGistLog.push(`${chrome.i18n.getMessage("pullFailed")}：${njGistHttpText(xhr.status)}`)
+                njGistFailAtList(action, njGistHttpText(xhr.status));
             },
             complete: function () {
                 //do something
@@ -2815,6 +2888,14 @@ https://www.google.com | Google
     }
 
     // 页面内密码输入弹窗（替代原生 prompt 输入 token）：密码样式输入，保存后不回显
+    // 4.6.2 令牌显示：输入框里只放打码后的令牌（头尾露、中间藏），提示语「已保存，留空表示不修改」放在输入框下方的文字行
+    // 4.6.3 需求五：令牌打码显示——只露头 6 尾 3，中间固定 3 个圆点（不按实际长度，短令牌露头 2 尾 2）
+    function njMaskToken(v) {
+        if (!v) { return ""; }
+        if (v.length <= 9) { return v.slice(0, 2) + "•••" + v.slice(-2); }
+        return v.slice(0, 6) + "•••" + v.slice(-3);
+    }
+
     function showSecretPrompt(title, onSubmit) {
         let modalHtml = `
         <div class="modal fade" id="secretPromptModal" tabindex="-1" role="dialog" aria-hidden="true">
@@ -2838,32 +2919,37 @@ https://www.google.com | Google
           </div>
         </div>
             `;
-
+        // 4.6.3 需求一：查找限定在容器内、关掉即销毁
         let modalContainer = document.createElement('div');
         modalContainer.innerHTML = modalHtml;
         document.body.appendChild(modalContainer);
-
-        $('#secretPromptModal').modal('show');
-        $('#secretPromptModal').on('hidden.bs.modal', function () { modalContainer.remove(); });
-
-        $('#njSecretInput').on('input', function () {
-            $('#njSecretSaveBtn').prop('disabled', $(this).val().trim().length === 0);
+        let $m = $(modalContainer);
+        let $modal = $m.find('.modal');
+        let njSubmitVal = null;
+        $modal.on('hidden.bs.modal', function () {
+            modalContainer.remove();
+            njCleanupOrphanBackdrop();
+            if (njSubmitVal) { onSubmit(njSubmitVal); }
         });
-        $('#njSecretInput').on('keydown', function (e) {
-            if (e.key === 'Enter' && !$('#njSecretSaveBtn').prop('disabled')) {
-                $('#njSecretSaveBtn').click();
+        // 4.6.6 需求二：弹框「已完全显示」后再聚焦（赶在 show 之前绑定、one 只触发一次；第三方审核建议）——界面库淡入结束时会把焦点抢到弹框本体，+300ms 的老写法抢不过它
+        $modal.one('shown.bs.modal', function () { $m.find('#njSecretInput').focus(); });
+        $modal.modal('show');
+        $m.find('#njSecretInput').on('input', function () {
+            $m.find('#njSecretSaveBtn').prop('disabled', $(this).val().trim().length === 0);
+        });
+        $m.find('#njSecretInput').on('keydown', function (e) {
+            if (e.key === 'Enter' && !$m.find('#njSecretSaveBtn').prop('disabled')) {
+                $m.find('#njSecretSaveBtn').click();
             }
         });
-        $('#njSecretSaveBtn').on('click', function () {
-            let val = $('#njSecretInput').val().trim();
-            $('#secretPromptModal').modal('hide');
-            if (val) { onSubmit(val); }
+        $m.find('#njSecretSaveBtn').on('click', function () {
+            njSubmitVal = $m.find('#njSecretInput').val().trim() || null;
+            $modal.modal('hide');
         });
-        setTimeout(function () { $('#njSecretInput').focus(); }, 300);
     }
 
     // 只做第 2 步的输 Y 确认弹窗：第 1 步确认与中间步骤由调用方串联（用于恢复前强制备份流程）
-    function showYConfirm(title, message, onConfirm) {
+    function showYConfirm(title, message, onConfirm, onCancel) {
         let modalHtml = `
         <div class="modal fade" id="confirmationModal" tabindex="-1" role="dialog" aria-labelledby="confirmationModalLabel" aria-hidden="true">
           <div class="modal-dialog" role="document">
@@ -2887,30 +2973,26 @@ https://www.google.com | Google
           </div>
         </div>
             `;
-
+        // 4.6.3 需求一：所有查找都限定在本弹框容器内、关掉即销毁，避免同名弹框残留导致第二次打开卡死
         let modalContainer = document.createElement('div');
         modalContainer.innerHTML = modalHtml;
         document.body.appendChild(modalContainer);
-
-        $('#confirmationModal').modal('show');
-
-        $('#njConfirmYInput').on('input', function () {
-            let ok = $(this).val().trim().toUpperCase() === 'Y';
-            $('#njConfirmExecBtn').prop('disabled', !ok);
+        let $m = $(modalContainer);
+        let $modal = $m.find('.modal');
+        let njConfirmed = false;
+        $modal.on('hidden.bs.modal', function () {
+            modalContainer.remove();
+            njCleanupOrphanBackdrop();
+            if (njConfirmed) { onConfirm(); } else if (onCancel) { onCancel(); }
         });
-
-        $('#njConfirmYInput').on('keydown', function (e) {
-            if (e.key === 'Enter' && !$('#njConfirmExecBtn').prop('disabled')) {
-                $('#njConfirmExecBtn').click();
-            }
+        // 4.6.6 需求二：弹框「已完全显示」后再聚焦（赶在 show 之前绑定、one 只触发一次；第三方审核建议）——界面库淡入结束时会把焦点抢到弹框本体，+300ms 的老写法抢不过它
+        $modal.one('shown.bs.modal', function () { $m.find('#njConfirmYInput').focus(); });
+        $modal.modal('show');
+        njBindYInput($m);
+        $m.find('#njConfirmExecBtn').on('click', function () {
+            njConfirmed = true;
+            $modal.modal('hide');
         });
-
-        $('#njConfirmExecBtn').on('click', function () {
-            $('#confirmationModal').modal('hide');
-            onConfirm();
-        });
-
-        setTimeout(function () { $('#njConfirmYInput').focus(); }, 300);
     }
 
     // 版本号比较：a 比 b 新返回正数，旧返回负数，相同返回 0
@@ -2974,8 +3056,6 @@ https://www.google.com | Google
     }
 
     function njMigrateLocalDataOnce() {
-        // 旧快照机制已删除（阶段5）：升级时顺手清掉遗留的快照键
-        chrome.storage.local.remove("webdavRestoreSnapshot");
         chrome.storage.local.get("njDataConverted41", function (items) {
             if (items.njDataConverted41) { njFillAddTimeOnce(njSettleMigration); return; }
             getShardings(function (data) {
@@ -3103,15 +3183,15 @@ https://www.google.com | Google
                 }
             },
             error: function (xhr, errorText, errorType) {
-                console.log(xhr);
+                console.log(xhr && xhr.status);
                 console.log(errorText);
                 console.log(errorType);
                 console.log("报错了！");
-                handleGistLog.push(`${chrome.i18n.getMessage("createFailed")}-->${xhr.responseText}`)
+                handleGistLog.push(`${chrome.i18n.getMessage("createFailed")}：${njGistHttpText(xhr.status)}`)
                     if (xhr.status === 403 || xhr.status === 429) {
-                        njLogEvent("gistRateLimited", false, "GitHub HTTP " + xhr.status);
+                        njLogEvent("gistRateLimited", false, "GitHub " + njGistHttpText(xhr.status));
                     } else {
-                        njLogEvent("gistPush", false, "GitHub HTTP " + xhr.status);
+                        njLogEvent("gistPush", false, "GitHub " + njGistHttpText(xhr.status));
                     }
             },
             complete: function () {
@@ -3152,15 +3232,15 @@ https://www.google.com | Google
                 }
             },
             error: function (xhr, errorText, errorType) {
-                console.log(xhr);
+                console.log(xhr && xhr.status);
                 console.log(errorText);
                 console.log(errorType);
                 console.log("报错了！");
-                handleGistLog.push(`${chrome.i18n.getMessage("createFailed")}-->${xhr.responseText}`)
+                handleGistLog.push(`${chrome.i18n.getMessage("createFailed")}：${njGistHttpText(xhr.status)}`)
                     if (xhr.status === 403 || xhr.status === 429) {
-                        njLogEvent("gistRateLimited", false, "Gitee HTTP " + xhr.status);
+                        njLogEvent("gistRateLimited", false, "Gitee " + njGistHttpText(xhr.status));
                     } else {
-                        njLogEvent("gistPush", false, "Gitee HTTP " + xhr.status);
+                        njLogEvent("gistPush", false, "Gitee " + njGistHttpText(xhr.status));
                     }
             },
             complete: function () {
@@ -3202,26 +3282,6 @@ https://www.google.com | Google
         }).toLowerCase();
     };
 
-    // 生成数据结构
-    function makeTabGroup(tabsArr) {
-        let date;
-        date = dateFormat("YYYY-mm-dd HH:MM:SS", new Date());
-        let tabGroup = {
-            date: date, id: genObjectId() // clever way to quickly get a unique ID
-        };
-        // 4.3 需求四：标签带自己的添加时间 addTime——已有的一律原样保留（拖拽/删除/还原不改时间），
-        // 没有的用本组生成时刻补上（同组收集的标签时间相同，即收集那一刻）
-        let res = tabsArr.map(function (t) {
-            let nt = {title: t.title, url: t.url};
-            nt.addTime = (t && typeof t.addTime === "string" && t.addTime) ? t.addTime : date;
-            return nt;
-        });
-        tabGroup.tabs = res;
-        tabGroup.isLock = false;
-        tabGroup.groupTitle = '';
-        tabGroup.isPined = false;
-        return tabGroup;
-    }
 
     // 生成数据结构
     function makeTabGroup(tabsArr, isLock, groupTitle, isPined) {
@@ -3255,6 +3315,12 @@ https://www.google.com | Google
                     delete items["tabGroups_" + i]
                 }
             }
+            if (!tabGroupsStr && typeof items["tabGroups_0"] === "string") {
+                // 4.6.4.1 审查修复：计数键丢失时按连续分片重建，避免已有数据被读成空、进而空备份覆盖远端
+                let njShardN = 0;
+                while (typeof items["tabGroups_" + njShardN] === "string") { njShardN++; }
+                for (let njShardI = 0; njShardI < njShardN; njShardI++) { tabGroupsStr += items["tabGroups_" + njShardI]; delete items["tabGroups_" + njShardI]; }
+            }
             let delTabGroupsStr = "";
             if (items.del_tabGroups_num >= 1) {
                 // 把分片数据组成字符串
@@ -3262,6 +3328,11 @@ https://www.google.com | Google
                     delTabGroupsStr += items["del_tabGroups_" + i];
                     delete items["del_tabGroups_" + i]
                 }
+            }
+            if (!delTabGroupsStr && typeof items["del_tabGroups_0"] === "string") {
+                let njShardN2 = 0;
+                while (typeof items["del_tabGroups_" + njShardN2] === "string") { njShardN2++; }
+                for (let njShardI2 = 0; njShardI2 < njShardN2; njShardI2++) { delTabGroupsStr += items["del_tabGroups_" + njShardI2]; delete items["del_tabGroups_" + njShardI2]; }
             }
             delete items.tabGroups_num
             delete items.del_tabGroups_num
@@ -3278,10 +3349,10 @@ https://www.google.com | Google
             delete items.githubGistId
             delete items.githubGistToken
             if (tabGroupsStr.length > 0) {
-                items["tabGroups"] = JSON.parse(tabGroupsStr)
+                try { items["tabGroups"] = JSON.parse(tabGroupsStr); } catch (e) { items["tabGroups"] = []; } // 4.6.4.1 审查修复：分片损坏时不中断
             }
             if (delTabGroupsStr.length > 0) {
-                items["delTabGroups"] = JSON.parse(delTabGroupsStr)
+                try { items["delTabGroups"] = JSON.parse(delTabGroupsStr); } catch (e) { items["delTabGroups"] = []; } // 4.6.4.1 审查修复：分片损坏时不中断
             }
             cb(items)
         });
@@ -3550,7 +3621,7 @@ https://www.google.com | Google
             m("span.nj-pager-jump", [
                 chrome.i18n.getMessage("pagerJump"),
                 m("input.form-control.nj-pager-input", {
-                    type: "number", min: 1, max: pages,
+                    type: "text", inputmode: "numeric",
                     onkeydown: function (e) {
                         if (e.key === "Enter") {
                             let v = parseInt(e.target.value, 10);
@@ -3588,9 +3659,8 @@ https://www.google.com | Google
         jump.className = "nj-pager-jump";
         jump.appendChild(document.createTextNode(chrome.i18n.getMessage("pagerJump")));
         let inp = document.createElement("input");
-        inp.type = "number";
-        inp.min = "1";
-        inp.max = String(pages);
+        inp.type = "text";
+        inp.inputMode = "numeric";
         inp.className = "form-control nj-pager-input";
         inp.addEventListener("keydown", function (e) {
             if (e.key === "Enter") {
@@ -3608,15 +3678,16 @@ https://www.google.com | Google
     // 体积 = 本地存储总占用（主页与回收站同口径），百分比以 10MB 为基准（用户指定）
     function njUpdateTotals(el, prefixKey, groupCount, tabCount) {
         if (!el) { return; }
-        let base = chrome.i18n.getMessage(prefixKey) + groupCount + chrome.i18n.getMessage("group") + " / " + tabCount + chrome.i18n.getMessage("statusTabsLabel");
+        // 4.6.3 需求六：「已存/已删」「已使用」加粗；已使用前加 &；数字、符号、汉字之间留空格
+        let base = "<b>" + chrome.i18n.getMessage(prefixKey) + "</b>" + groupCount + " " + chrome.i18n.getMessage("group") + " / " + tabCount + " " + chrome.i18n.getMessage("statusTabsLabel");
         el.innerHTML = base;
         el.removeAttribute("title"); // 4.5.1 修复：状态文字不再复制一份到 title，免得鼠标悬停弹出与正文一模一样的重复提示
         if (chrome.storage && chrome.storage.local && typeof chrome.storage.local.getBytesInUse === "function") {
             chrome.storage.local.getBytesInUse(null, function (bytes) {
                 let mb = (bytes / 1048576).toFixed(2);
                 let pct = (bytes / 10485760 * 100).toFixed(1);
-                let full = base + " " + chrome.i18n.getMessage("statusUsage", [mb, pct]);
-                el.innerHTML = full;
+                let usage = chrome.i18n.getMessage("statusUsage", [mb, pct + " "]).replace(/^(.*?[：:])/, "<b>$1</b>");
+                el.innerHTML = base + " & " + usage;
             });
         }
     }
@@ -3727,12 +3798,12 @@ https://www.google.com | Google
     function showAllTabs() {
         njCurrentPage = "#home";
         njLoadData(function (njData) {
-        chrome.storage.local.get(["options", "dragType", "restoreDiscarded", "discardedThreshold"], function (storage) {
+        chrome.storage.local.get(["options", "dragType"], function (storage) {
             let bridge = njData.tabGroups;
             let i;
             let total = 0;
             for (i = 0; i < bridge.length; i += 1) {
-                total += bridge[i].tabs.length;
+                total += (bridge[i].tabs || []).length;
             }
             let totalsEl = document.getElementById('totals');
             njUpdateTotals(totalsEl, "existed", i, total);
@@ -3743,11 +3814,6 @@ https://www.google.com | Google
                 opts = storage.options || {
                     deleteTabOnOpen: 'no'
                 };
-            // 恢复时休眠打开的开关（阶段D，存 chrome.storage.local 的 restoreDiscarded，默认 false = 保持原行为）
-            let restoreDiscarded = storage.restoreDiscarded === true;
-            // 4.4 需求五：休眠阈值 N（同一个数，默认 10）；只在休眠开关开时才参与判断
-            let discardedN = parseInt(storage.discardedThreshold, 10);
-            if (!(discardedN >= 1)) { discardedN = 10; }
 
             function saveTabGroups(json) {
                 njSaveAll("object", json);
@@ -3982,7 +4048,7 @@ https://www.google.com | Google
                     }), m('span.restore-all', {
                         onclick: function (e) {
                             let ci = currentGroupIndex((e && e.currentTarget) || this, i);
-                            // 4.5 需求一：打开整组走 njOpenWholeGroup——点击时现读休眠设置、汇总休眠结果写日志
+                            // 打开整组走 njOpenWholeGroup（普通打开，休眠打开已取消）
                             njOpenWholeGroup(group, isLock, groupTitle, function () {
                                 tabs.vm.rmGroup(ci);
                             });
@@ -4132,6 +4198,10 @@ https://www.google.com | Google
                         group: {
                             name: "tabGroups", pull: false, put: false
                         }, scroll: true, easing: "cubic-bezier(1, 0, 0, 1)", animation: 100, //动画参数
+                        // 4.6.5 需求十：draggable 限定为 .tabs（与回收站同口径）——原先不限定，
+                        // 分页条也在拖拽范围内，它虽带 .filtered 豁免拖拽，但 Sortable 对被过滤元素
+                        // 的 mousedown 默认 preventDefault，跳页输入框永远拿不到焦点、无法输入
+                        draggable: ".tabs",
                         ghostClass: 'ghost', filter: '.filtered',
                         // 4.4 需求六配套：拖拽进行中标记——存储变化引发的自动重渲染须等拖拽结束（见 njRenderListWhenIdle）
                         onChoose: function () {
@@ -4362,7 +4432,7 @@ https://www.google.com | Google
             },
             body: body
         }).then(function (resp) {
-            if (!resp.ok) { throw new Error("HTTP " + resp.status); }
+            if (!resp.ok) { throw new Error(njHttpTextZh(resp.status)); }
             return resp.text();
         }).then(function (text) {
             cb(njParseVersionEntries(text), null);
@@ -4371,14 +4441,22 @@ https://www.google.com | Google
         });
     }
 
-    // 连接测试（4.2 需求三）：用当前填写的地址/账号/密码试连一次，当场报成功或失败原因
+    // 连接测试：4.6.3 需求十——结果不用弹框，改在按钮下一行红绿文字显示，并带连接延迟；错误码带人话原因（与需求三同口径）
     function testWebDavConnection() {
         let cfg = readWebDavConfig();
+        let resultEl = document.getElementById("webdavTestResult");
+        function showResult(ok, text) {
+            if (resultEl) {
+                resultEl.textContent = text;
+                resultEl.style.color = ok ? "#2e7d32" : "#c62828";
+            }
+        }
         if (!cfg || !cfg.webdavUrl) {
-            showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavConfigMissing")}`);
+            showResult(false, `${chrome.i18n.getMessage("webdavConfigMissing")}`);
             return;
         }
         let body = '<?xml version="1.0" encoding="utf-8"?><propfind xmlns="DAV:"><prop><displayname/></prop></propfind>';
+        let startedAt = performance.now();
         fetch(cfg.webdavUrl, {
             method: "PROPFIND",
             credentials: "omit",
@@ -4389,11 +4467,39 @@ https://www.google.com | Google
             },
             body: body
         }).then(function (resp) {
-            if (!resp.ok) { throw new Error("HTTP " + resp.status); }
-            showAlert(`${chrome.i18n.getMessage("webdavTitle")}`, `${chrome.i18n.getMessage("webdavTestSuccess")}`);
+            let ms = Math.round(performance.now() - startedAt);
+            if (!resp.ok) {
+                showResult(false, `连接失败（${njHttpTextZh(resp.status)}） · 延迟 ${ms} 毫秒`);
+                return;
+            }
+            showResult(true, `连接成功 · 延迟 ${ms} 毫秒`);
         }).catch(function (err) {
-            showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavTestFailed")} ${err.message}`);
+            let ms = Math.round(performance.now() - startedAt);
+            showResult(false, `连接失败（无法访问服务器） · 延迟 ${ms} 毫秒`);
         });
+    }
+
+    // 状态码人话原因（页面侧，与后台 njHttpText 同口径）
+    function njHttpTextZh(status) {
+        if (!status) { return ""; }
+        let table = {
+            401: "账号或密码错误",
+            403: "拒绝访问（权限不足）",
+            404: "地址能通但路径不对",
+            429: "请求太频繁，被服务器限流，请稍后再试"
+        };
+        let r = table[status] || (status >= 500 ? "服务器出错" : (status >= 400 ? "请求被服务器拒绝" : ""));
+        return "HTTP " + status + (r ? "：" + r : "");
+    }
+
+    // WebDAV 出错文本归一化（4.6.5 需求十一）：HTTP 错误已在抛出时带上人话类别；只把已知的英文原始报错换成人话，含中文的一律原样保留、不误伤
+    function njWebdavErrText(err) {
+        let m = err && err.message ? String(err.message) : "";
+        if (/^HTTP \d+/.test(m)) { return m; }
+        if (err && err.name === "SyntaxError") { return "备份内容损坏或格式不对"; }
+        if (/[\u4e00-\u9fff]/.test(m)) { return m; }
+        if (/Failed to fetch|NetworkError|Load failed/i.test(m)) { return "网络出错（连不上或超时）"; }
+        return m || "未知错误";
     }
 
     // 计算要删的旧版本：保留“最近 keepCount 份”∪“最近 keepDays 天内”∪ 刚上传的那份；两个规则都关（0）时不删任何版本
@@ -4424,7 +4530,7 @@ https://www.google.com | Google
             },
             body: body
         }).then(function (resp) {
-            if (!resp.ok) { throw new Error("HTTP " + resp.status); }
+            if (!resp.ok) { throw new Error(njHttpTextZh(resp.status)); }
             return resp.text();
         }).then(function (text) {
             cb(njParseVersionNames(text), null);
@@ -4449,19 +4555,23 @@ https://www.google.com | Google
     }
 
     // 版本选择弹窗：列出远端历史版本，点一个恢复它
+    // 4.6.3 需求十二：加分页与「删除全部备份」按钮（2 次确认才执行）；4.6.5 需求七：每页改 10 条、每条加编号（跨页连续）
     function showWebdavVersionPicker(entries, cfg, onPick) {
-        function renderItems(list) {
+        const NJ_VER_PAGE_SIZE = 10;
+        let njVerList = entries.slice();
+        let njVerPage = 0;
+        function renderItems(list, offset) {
             if (!list.length) {
                 return `<div class="list-group-item">${chrome.i18n.getMessage("webdavNoVersions")}</div>`;
             }
-            return list.map(function (entry) {
+            return list.map(function (entry, idx) {
                 let t = njVersionTime(entry.name);
                 let timeText = t ? new Date(t).toLocaleString() : "";
                 let sizeText = njFormatFileSize(entry.size);
                 let meta = [timeText, sizeText].filter(function (x) { return !!x; }).join(" · ");
                 return `<div class="list-group-item" style="display:flex;align-items:center;gap:10px;">
                     <div style="flex:1;min-width:0;">
-                        <div style="word-break:break-all;">${entry.name}</div>
+                        <div style="word-break:break-all;">${(offset || 0) + idx + 1}. ${entry.name}</div>
                         <div class="text-muted" style="font-size:12px;">${meta}</div>
                     </div>
                     <button type="button" class="btn btn-primary btn-sm nj-version-pick" data-name="${entry.name}">${chrome.i18n.getMessage("recover")}</button>
@@ -4480,9 +4590,11 @@ https://www.google.com | Google
                 </button>
               </div>
               <div class="modal-body">
-                <div class="list-group" id="njVersionList">${renderItems(entries)}</div>
+                <div class="list-group" id="njVersionList"></div>
+                <div id="njVersionPager" style="margin-top:8px;"></div>
               </div>
               <div class="modal-footer">
+                <button type="button" class="btn btn-danger" id="njVersionDelAllBtn">${chrome.i18n.getMessage("webdavDeleteAll")}</button>
                 <button type="button" class="btn btn-secondary" data-dismiss="modal">${chrome.i18n.getMessage("njCancel")}</button>
               </div>
             </div>
@@ -4492,11 +4604,41 @@ https://www.google.com | Google
         let modalContainer = document.createElement('div');
         modalContainer.innerHTML = modalHtml;
         document.body.appendChild(modalContainer);
-        $('#webdavVersionModal').modal('show');
-        $('#webdavVersionModal').on('hidden.bs.modal', function () { modalContainer.remove(); });
+        let $modal = $(modalContainer).find('.modal');
+        function renderPage() {
+            let pages = Math.max(1, Math.ceil(njVerList.length / NJ_VER_PAGE_SIZE));
+            if (njVerPage >= pages) { njVerPage = pages - 1; }
+            if (njVerPage < 0) { njVerPage = 0; }
+            let slice = njVerList.slice(njVerPage * NJ_VER_PAGE_SIZE, (njVerPage + 1) * NJ_VER_PAGE_SIZE);
+            modalContainer.querySelector("#njVersionList").innerHTML = renderItems(slice, njVerPage * NJ_VER_PAGE_SIZE);
+            let pagerEl = modalContainer.querySelector("#njVersionPager");
+            pagerEl.innerHTML = "";
+            if (pages > 1) {
+                // 分页样式复用全局 .nj-pager（njDomPager 按全局 50 条算页数，不适用本框的 10 条，故自绘同款按钮）
+                let wrap = document.createElement("div");
+                wrap.className = "nj-pager";
+                function pbtn(label, target, opts) {
+                    opts = opts || {};
+                    let b = document.createElement("button");
+                    b.type = "button";
+                    b.className = "btn btn-default btn-sm" + (opts.active ? " active" : "");
+                    b.textContent = label;
+                    if (opts.disabled) { b.disabled = true; }
+                    b.addEventListener("click", function () { if (!opts.disabled && !opts.active) { njVerPage = target; renderPage(); } });
+                    wrap.appendChild(b);
+                }
+                pbtn(chrome.i18n.getMessage("pagerPrev"), njVerPage - 1, {disabled: njVerPage === 0});
+                for (let i = 0; i < pages; i++) { pbtn(String(i + 1), i, {active: i === njVerPage}); }
+                pbtn(chrome.i18n.getMessage("pagerNext"), njVerPage + 1, {disabled: njVerPage >= pages - 1});
+                pagerEl.appendChild(wrap);
+            }
+        }
+        renderPage();
+        $modal.on('hidden.bs.modal', function () { modalContainer.remove(); njCleanupOrphanBackdrop(); });
+        $modal.modal('show');
         $(modalContainer).on('click', '.nj-version-pick', function () {
             let picked = $(this).data('name');
-            $('#webdavVersionModal').modal('hide');
+            $modal.modal('hide');
             onPick(picked);
         });
         $(modalContainer).on('click', '.nj-version-del', function () {
@@ -4507,13 +4649,35 @@ https://www.google.com | Google
                     credentials: "omit",
                     headers: {"Authorization": buildBasicAuthHeader(cfg.webdavUser, cfg.webdavPass)}
                 }).then(function (resp) {
-                    if (!resp.ok) { throw new Error("HTTP " + resp.status); }
-                    listWebdavVersionsDetailed(cfg, function (list, err) {
-                        let el = document.getElementById("njVersionList");
-                        if (!err && el) { el.innerHTML = renderItems(list); }
-                    });
+                    if (!resp.ok) { throw new Error(njHttpTextZh(resp.status)); }
+                    njVerList = njVerList.filter(function (e) { return e.name !== name; });
+                    renderPage();
                 }).catch(function (err) {
-                    showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavVersionDeleteFailed")} ${err.message}`);
+                    showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavVersionDeleteFailed")} ${njWebdavErrText(err)}`);
+                });
+            });
+        });
+        $(modalContainer).on('click', '#njVersionDelAllBtn', function () {
+            if (!njVerList.length) { return; }
+            let total = njVerList.length;
+            showDoubleConfirmation(`${chrome.i18n.getMessage("webdavTitle")}`, `${chrome.i18n.getMessage("webdavDeleteAllConfirm")}（${total}）`, function () {
+                let names = njVerList.map(function (e) { return e.name; });
+                let chain = Promise.resolve();
+                let failed = 0;
+                names.forEach(function (name) {
+                    chain = chain.then(function () {
+                        return fetch(buildWebDavFileUrl(cfg.webdavUrl, name), {
+                            method: "DELETE",
+                            credentials: "omit",
+                            headers: {"Authorization": buildBasicAuthHeader(cfg.webdavUser, cfg.webdavPass)}
+                        }).then(function (resp) { if (!resp.ok) { failed++; } }).catch(function () { failed++; });
+                    });
+                });
+                chain.then(function () {
+                    njLogEvent("webdavCleanup", failed === 0, failed === 0 ? `删除全部备份 ${total} 份` : `删除全部备份 ${total} 份，失败 ${failed} 份`);
+                    njVerList = [];
+                    renderPage();
+                    showAlert(`${chrome.i18n.getMessage("webdavTitle")}`, failed === 0 ? `${chrome.i18n.getMessage("webdavDeleteAllDone")}（${total}）` : `${chrome.i18n.getMessage("webdavVersionDeleteFailed")} ${failed}`);
                 });
             });
         });
@@ -4542,26 +4706,27 @@ https://www.google.com | Google
                 body: JSON.stringify(backup)
             }).then(function (resp) {
                 if (!resp.ok) {
-                    throw new Error("HTTP " + resp.status);
+                    throw new Error(njHttpTextZh(resp.status));
                 }
                 showAlert(`${chrome.i18n.getMessage("webdavTitle")}`, `${chrome.i18n.getMessage("webdavUploadSuccess")} ${fileName}`);
-                njLogEvent("webdavUpload", true, fileName);
+                njLogEvent("webdavUpload", true, "", [fileName]);
                 chrome.storage.local.get(["webdavKeepDays", "webdavKeepCount"], function (st) {
                     cleanupWebdavVersions(cfg,
                         st.webdavKeepDays === undefined ? 30 : st.webdavKeepDays,
-                        st.webdavKeepCount === undefined ? 10 : st.webdavKeepCount,
+                        st.webdavKeepCount === undefined ? 100 : st.webdavKeepCount,
                         fileName);
                 });
             }).catch(function (err) {
-                showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavUploadFailed")} ${err.message}`);
-                njLogEvent("webdavUpload", false, err.message);
+                showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavUploadFailed")} ${njWebdavErrText(err)}`);
+                njLogEvent("webdavUpload", false, njWebdavErrText(err));
             });
           });
         });
     }
 
-    // 从 WebDAV 恢复（阶段5）：先下载并校验 → 第 1 次确认 → 强制备份当前数据为一个新版本 → 第 2 次输 Y 确认 → 才覆盖本地
-    // 强制备份失败立即中止、本地数据不动；旧快照机制已删除
+    // 从 WebDAV 恢复：先下载 → 第 1 次确认（写明内容构成）→ 强制备份当前数据为一个新版本 → 第 2 次输 Y 确认 → 整份直接覆盖本地
+    // 4.6.3 需求十四：覆盖不清洗、不跳过任何条目，备份里有什么就还原什么；只保留整份结构校验（根本不是备份文件才拒绝）
+    // 4.6.3 需求七：服务器上没有这个文件（404）时提示「服务器上还没有备份版本。」，不记失败日志
     function restoreBackupFromWebDav(targetFile) {
         let cfg = readWebDavConfig();
         if (!cfg || !cfg.webdavUrl) {
@@ -4571,15 +4736,19 @@ https://www.google.com | Google
         let fileName = targetFile || cfg.webdavFile;
         fetch(buildWebDavFileUrl(cfg.webdavUrl, fileName), {
             method: "GET",
-            // 认证只走 Authorization 头，避免 401 时被浏览器认证框挂起（同上传）
             credentials: "omit",
             headers: {"Authorization": buildBasicAuthHeader(cfg.webdavUser, cfg.webdavPass)}
         }).then(function (resp) {
+            if (resp.status === 404) {
+                showAlert(`${chrome.i18n.getMessage("webdavTitle")}`, `${chrome.i18n.getMessage("webdavNoBackupYet")}`);
+                return null;
+            }
             if (!resp.ok) {
-                throw new Error("HTTP " + resp.status);
+                throw new Error(njHttpTextZh(resp.status));
             }
             return resp.text();
         }).then(function (text) {
+            if (text === null) { return; }
             let backup;
             try {
                 backup = JSON.parse(text);
@@ -4587,27 +4756,27 @@ https://www.google.com | Google
                 showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavRestoreFailed")} ${chrome.i18n.getMessage("backupInvalid")}`);
                 return;
             }
-            // 4.3 需求十四：与导入备份同一套宽容清洗；结构性问题才拒绝，单条坏数据跳过并逐条记日志
+            // 整份结构校验：结构不对（不是备份文件、无版本号或大版本不符）整份拒绝，确认也无法绕过；通过后用原始内容覆盖，不逐条清洗
             let check = sanitizeBackupObject(backup);
             if (check.fatal) {
-                // 无版本号或大版本不符直接拒绝，确认也无法绕过
                 njLogEvent("webdavRestore", false, njReasonText(check.fatal));
                 showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavRestoreFailed")} ${chrome.i18n.getMessage("backupInvalid")}`);
                 return;
             }
-            if (check.skipped.length > 0) {
-                njLogEvent("webdavRestore", false, "共跳过 " + check.skipped.length + " 条，明细点开看", check.skipped.map(function (s) { return njSkippedDetail(s); }));
-            }
-            let skippedNote = check.skipped.length > 0 ? `\n${check.skipped.length}${chrome.i18n.getMessage("backupImportSkipped")}` : "";
-            // 第 1 次确认：讲清恢复后果和强制备份安排；备份版本比当前插件新时额外警告
-            let msg = `${chrome.i18n.getMessage("webdavRestoreConfirm")}<br>${chrome.i18n.getMessage("webdavRestoreForceNote")}`;
+            let rawMain = Array.isArray(backup.tabGroups) ? backup.tabGroups : [];
+            let rawDel = Array.isArray(backup.delTabGroups) ? backup.delTabGroups : [];
+            let mainTabs = 0; rawMain.forEach(function (g) { mainTabs += (g.tabs || []).length; });
+            let delTabs = 0; rawDel.forEach(function (g) { delTabs += (g.tabs || []).length; });
+            // 防呆：两次确认都写明这份备份的内容构成
+            let countsLine = `远端 WebDAV：主页 ${rawMain.length} 组 / ${mainTabs} 条、回收站 ${rawDel.length} 组 / ${delTabs} 条`;
+            let msg = `${chrome.i18n.getMessage("webdavRestoreConfirm")}<br>${countsLine}`;
             if (check.appVersion && njVersionCompare(check.appVersion, chrome.runtime.getManifest().version) > 0) {
                 msg += `<br><strong>${chrome.i18n.getMessage("webdavNewerWarnPrefix")}${check.appVersion}${chrome.i18n.getMessage("webdavNewerWarnSuffix")}</strong>`;
             }
-            if (skippedNote) {
-                msg += `<br>${skippedNote.replace(/\n/g, "")}`;
-            }
-            showConfirmation(`${chrome.i18n.getMessage("webdavTitle")}`, msg, function () {
+            // 南极口径：「2 次确认」是一个框里走两步（先看清内容构成，再输 Y 才能执行），不是弹两个框；
+            // 输 Y 确认后先做恢复前强制备份，备份成功才真正覆盖
+            // 4.6.5 需求九：强制备份提示语按模板定稿挪到输 Y 框下方、与「确认执行」同一行（页脚左侧小字）
+            showDoubleConfirmation(`${chrome.i18n.getMessage("webdavTitle")}`, msg, function () {
                 // 强制备份：先把当前本地数据作为一个新版本上传成功，才继续
                 getShardings(function (items) {
                   collectBackupSettings(function (settings) {
@@ -4623,29 +4792,29 @@ https://www.google.com | Google
                         body: JSON.stringify(current)
                     }).then(function (resp) {
                         if (!resp.ok) {
-                            throw new Error("HTTP " + resp.status);
+                            throw new Error(njHttpTextZh(resp.status));
                         }
-                        njLogEvent("webdavForceBackup", true, forceName);
-                        // 第 2 次确认：输 Y 才真正覆盖本地
-                        showYConfirm(`${chrome.i18n.getMessage("webdavTitle")}`, `${chrome.i18n.getMessage("webdavRestoreConfirm")}`, function () {
-                            saveShardings(check.tabGroups, "object");
-                            saveShardings(check.delTabGroups, "del");
-                            applyBackupSettings(backup.settings);
-                            njLogEvent("webdavRestore", true, fileName + (check.skipped.length > 0 ? "，跳过 " + check.skipped.length + " 条" : ""));
-                            chrome.storage.local.remove("webdavRestoreSnapshot");
-                            showAlert(`${chrome.i18n.getMessage("webdavTitle")}`, `${chrome.i18n.getMessage("webdavRestoreSuccess")}${skippedNote}`);
-                            setTimeout(refresh, 300);
+                        // 强制备份成功，真正覆盖本地（确认已在前面的一个框里走完两步）
+                        saveShardings(rawMain, "object");
+                        saveShardings(rawDel, "del");
+                        applyBackupSettings(backup.settings);
+                        // 4.6.5 需求四：两条日志串行写——原先紧挨着连写，两次读-改-写互相覆盖，强制备份那条总是丢；
+                        // 需求五：成功框 6 秒自动消失、原地重画，不再整页刷新（原先 300 毫秒后刷新还会打断日志落盘）
+                        njLogEvent("webdavForceBackup", true, "", [forceName], null, function () {
+                            njLogEvent("webdavRestore", true, "", [fileName, countsLine]);
                         });
+                        showAlert(`${chrome.i18n.getMessage("webdavTitle")}`, `${chrome.i18n.getMessage("webdavRestoreSuccess")}`, 6000);
+                        njRenderListWhenIdle();
                     }).catch(function (err) {
-                        showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavForceBackupFailed")}${err.message}`);
-                        njLogEvent("webdavForceBackup", false, err.message);
+                        showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavForceBackupFailed")}${njWebdavErrText(err)}`);
+                        njLogEvent("webdavForceBackup", false, njWebdavErrText(err));
                     });
                   });
                 });
-            });
+            }, null, `${chrome.i18n.getMessage("webdavRestoreForceNote")}`);
         }).catch(function (err) {
-            njLogEvent("webdavRestore", false, err.message);
-            showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavRestoreFailed")} ${err.message}`);
+            njLogEvent("webdavRestore", false, njWebdavErrText(err));
+            showAlert(`${chrome.i18n.getMessage("showError")}`, `${chrome.i18n.getMessage("webdavRestoreFailed")} ${njWebdavErrText(err)}`);
         });
     }
 
@@ -4686,11 +4855,11 @@ https://www.google.com | Google
             applyMemory(v);
             el.value = "";
             // 4.5 需求三：保存后在提示里带上令牌末 3 位，方便认是哪一把令牌
-            el.placeholder = chrome.i18n.getMessage("secretSavedPlaceholder") + chrome.i18n.getMessage("secretSavedLast3") + v.slice(-3);
+            el.placeholder = njMaskToken(v);
         });
     }
 
-    // 配置页（4.2 需求一）：只放通用开关——打开方式、发送后行为、休眠打开、拖拽方式；令牌在 Gist 页、WebDAV 在 WebDAV 页
+    // 配置页（4.2 需求一）：只放通用开关——打开方式、发送后行为、拖拽方式；令牌在 Gist 页、WebDAV 在 WebDAV 页（休眠打开已于 4.6 取消）
     function showOptions() {
         document.getElementById("options").innerHTML = `
             <div class="option">
@@ -4713,15 +4882,6 @@ https://www.google.com | Google
                 </div>
             </div>
             <hr>
-            <div class="option">
-                <div class="desc">
-                    <p>${chrome.i18n.getMessage("restoreDiscarded")}</p>
-                </div>
-                <div class="choices">
-                    <p><label><input type="checkbox" id="restoreDiscarded"><span> ${chrome.i18n.getMessage("restoreDiscardedEnable")}</span></label></p>
-                    <p><span> ${chrome.i18n.getMessage("discardedThresholdText")}</span> <input type="number" id="discardedThreshold" class="form-control" style="width:90px;display:inline-block;" min="1" max="999" step="1"></p>
-                </div>
-            </div>
         `;
         chrome.storage.local.get(null, function (storage) {
             let opts = storage.options || {};
@@ -4737,15 +4897,6 @@ https://www.google.com | Google
                 $('input[name="openBackgroundAfterSendTab"][value="' + opts.openBackgroundAfterSendTab + '"]').prop('checked', 'checked');
             }
 
-            let restoreDiscardedEl = document.getElementById("restoreDiscarded");
-            if (restoreDiscardedEl && storage.restoreDiscarded) {
-                restoreDiscardedEl.checked = true;
-            }
-            let discardedThresholdEl = document.getElementById("discardedThreshold");
-            if (discardedThresholdEl) {
-                let savedN = parseInt(storage.discardedThreshold, 10);
-                discardedThresholdEl.value = (savedN >= 1) ? savedN : 10;
-            }
             // 4.4 需求六：拖拽方式两个开关已删除（两种拖拽默认都开），无初始化项
         });
 
@@ -4756,18 +4907,6 @@ https://www.google.com | Google
         // 打开方式两组单选：改完自动保存
         document.querySelectorAll('input[name="deleteTabOnOpen"], input[name="openBackgroundAfterSendTab"]').forEach(function (el) {
             el.addEventListener('change', njSaveGeneralOptions);
-        });
-        // 恢复时休眠打开：勾选即存
-        document.getElementById('restoreDiscarded').addEventListener('change', function () {
-            chrome.storage.local.set({restoreDiscarded: this.checked}, njAutoSavedToast);
-        });
-        // 休眠阈值 N（4.4 需求五）：改完自动保存；非法值回落到默认 10 并把输入框改回 10
-        document.getElementById('discardedThreshold').addEventListener('change', function () {
-            let n = parseInt(this.value, 10);
-            if (!(n >= 1)) { n = 10; }
-            if (n > 999) { n = 999; }
-            this.value = n;
-            chrome.storage.local.set({discardedThreshold: n}, njAutoSavedToast);
         });
         // 4.4 需求六：拖拽开关已去掉，无联动处理
     }
@@ -4796,29 +4935,25 @@ https://www.google.com | Google
                     <p>${chrome.i18n.getMessage("gistFunction")}</p>
                 </div>
             </div>
-            <div class="form-group row">
-              <label for="githubToken" class="col-sm-2 control-label">${chrome.i18n.getMessage("githubToken")}:</label>
-              <div class="col-sm-5">
-                <div class="input-group">
-                  <input type="password" class="form-control" id="githubToken" placeholder="${chrome.i18n.getMessage("input")}${chrome.i18n.getMessage("githubToken")}">
-                </div>
+            <div class="nj-token-row">
+              <label for="githubToken" class="control-label nj-token-label"><span class="nj-repo-name">GitHub</span> ${chrome.i18n.getMessage("repoTokenLabel")}:</label>
+              <div class="nj-token-cell">
+                <input type="password" class="form-control" id="githubToken" placeholder="${chrome.i18n.getMessage("input")}${chrome.i18n.getMessage("githubToken")}">
               </div>
+              <button id="pushToGithubGist" type="button" class="btn btn-default nj-gist-act">${chrome.i18n.getMessage("pushToGistShort")}</button>
+              <button id="pullFromGithubGist" type="button" class="btn btn-default nj-gist-act">${chrome.i18n.getMessage("pullFromGistShort")}</button>
+              <span class="nj-auto-status" id="gistAutoStatusGithub"></span>
             </div>
-            <div class="form-group row">
-              <label for="giteeToken" class="col-sm-2 control-label">${chrome.i18n.getMessage("giteeToken")}:</label>
-              <div class="col-sm-5">
-                <div class="input-group">
-                  <input type="password" class="form-control" id="giteeToken" placeholder="${chrome.i18n.getMessage("input")}${chrome.i18n.getMessage("giteeToken")}">
-                </div>
+            <div class="nj-token-row">
+              <label for="giteeToken" class="control-label nj-token-label"><span class="nj-repo-name">Gitee</span> ${chrome.i18n.getMessage("repoTokenLabel")}:</label>
+              <div class="nj-token-cell">
+                <input type="password" class="form-control" id="giteeToken" placeholder="${chrome.i18n.getMessage("input")}${chrome.i18n.getMessage("giteeToken")}">
               </div>
+              <button id="pushToGiteeGist" type="button" class="btn btn-default nj-gist-act">${chrome.i18n.getMessage("pushToGistShort")}</button>
+              <button id="pullFromGiteeGist" type="button" class="btn btn-default nj-gist-act">${chrome.i18n.getMessage("pullFromGistShort")}</button>
+              <span class="nj-auto-status" id="gistAutoStatusGitee"></span>
             </div>
-            <p class="nj-secret-note"><span>${chrome.i18n.getMessage("secretSecurityNote")}</span><span>${chrome.i18n.getMessage("secretSecurityWarn")}</span></p>
-            <div style="margin-bottom:5px">
-                <button id="pushToGithubGist" type="button" class="btn btn-default">${chrome.i18n.getMessage("pushToGithubGist")}</button>
-                <button id="pullFromGithubGist" type="button" class="btn btn-default">${chrome.i18n.getMessage("pullFromGithubGist")}</button>
-                <button id="pushToGiteeGist" type="button" class="btn btn-default">${chrome.i18n.getMessage("pushToGiteeGist")}</button>
-                <button id="pullFromGiteeGist" type="button" class="btn btn-default">${chrome.i18n.getMessage("pullFromGiteeGist")}</button>
-            </div>
+            <p class="nj-secret-note nj-note-indent"><span>${chrome.i18n.getMessage("secretSecurityNote")}</span><span>${chrome.i18n.getMessage("secretSecurityWarn")}</span></p>
             <hr>
             <div class="option">
                 <div class="desc">
@@ -4836,8 +4971,6 @@ https://www.google.com | Google
                         </select>
                     </p>
                     <p id="gistRateWarn" style="color:#c9302c;" class="hide">${chrome.i18n.getMessage("gistAutoRateWarn")}</p>
-                    <p>${chrome.i18n.getMessage("gistAutoStatusLabel")} (GitHub): <span id="gistAutoStatusGithub"></span></p>
-                    <p>${chrome.i18n.getMessage("gistAutoStatusLabel")} (Gitee): <span id="gistAutoStatusGitee"></span></p>
                 </div>
             </div>
         `;
@@ -4848,7 +4981,7 @@ https://www.google.com | Google
                 njLoadSecretField("githubGistToken", function (plain) {
                     let el = document.getElementById("githubToken");
                     if (el) {
-                        el.placeholder = chrome.i18n.getMessage("secretSavedPlaceholder") + (plain ? (chrome.i18n.getMessage("secretSavedLast3") + plain.slice(-3)) : "");
+                        if (plain) { el.placeholder = njMaskToken(plain); }
                     }
                 });
             }
@@ -4856,7 +4989,7 @@ https://www.google.com | Google
                 njLoadSecretField("giteeGistToken", function (plain) {
                     let el = document.getElementById("giteeToken");
                     if (el) {
-                        el.placeholder = chrome.i18n.getMessage("secretSavedPlaceholder") + (plain ? (chrome.i18n.getMessage("secretSavedLast3") + plain.slice(-3)) : "");
+                        if (plain) { el.placeholder = njMaskToken(plain); }
                     }
                 });
             }
@@ -4880,13 +5013,12 @@ https://www.google.com | Google
                     return `${chrome.i18n.getMessage("gistAutoStatusSuccess")} (${when})`;
                 }
                 if (r.result === "skipped") {
-                    return `${chrome.i18n.getMessage("gistAutoStatusSkipped")} (${when})`;
+                    return r.reason ? `${chrome.i18n.getMessage("gistAutoStatusSkippedPrefix")}：${r.reason} (${when})` : `${chrome.i18n.getMessage("gistAutoStatusSkipped")} (${when})`;
                 }
                 return `${chrome.i18n.getMessage("gistAutoStatusFailed")} (${when}${r.reason ? ": " + r.reason : ""})`;
             };
-            let legacyAuto = storage.gistAutoLastResult;
-            let rGithub = storage.gistAutoLastResultGithub || (legacyAuto && legacyAuto.provider === "github" ? legacyAuto : null);
-            let rGitee = storage.gistAutoLastResultGitee || (legacyAuto && legacyAuto.provider === "gitee" ? legacyAuto : null);
+            let rGithub = storage.gistAutoLastResultGithub || null;
+            let rGitee = storage.gistAutoLastResultGitee || null;
             document.getElementById("gistAutoStatusGithub").textContent = fmtAutoStatus(rGithub);
             document.getElementById("gistAutoStatusGitee").textContent = fmtAutoStatus(rGitee);
         });
@@ -4935,14 +5067,14 @@ https://www.google.com | Google
               <div class="col-sm-5">
                 <input type="password" class="form-control" id="webdavPass" placeholder="${chrome.i18n.getMessage("input")}${chrome.i18n.getMessage("webdavPass")}">
               </div>
-            <p class="nj-secret-note nj-span-all"><span>${chrome.i18n.getMessage("secretSecurityNote")}</span><span>${chrome.i18n.getMessage("secretSecurityWarn")}</span></p>
+            <p class="nj-secret-note" style="grid-column: 2 / -1;"><span>${chrome.i18n.getMessage("secretSecurityNote")}</span><span>${chrome.i18n.getMessage("secretSecurityWarn")}</span></p>
               <label for="webdavAutoBackup" class="col-sm-2 control-label">${chrome.i18n.getMessage("webdavAutoBackup")}:</label>
               <div class="col-sm-5">
                 <input type="checkbox" id="webdavAutoBackup">
               </div>
               <label for="webdavIntervalHours" class="col-sm-2 control-label">${chrome.i18n.getMessage("webdavIntervalHours")}:</label>
               <div class="col-sm-5">
-                <input type="number" min="1" class="form-control" id="webdavIntervalHours" placeholder="12">
+                <input type="number" min="1" class="form-control" id="webdavIntervalHours" placeholder="6">
               </div>
               <label for="webdavKeepDays" class="col-sm-2 control-label">${chrome.i18n.getMessage("webdavKeepDays")}:</label>
               <div class="col-sm-5">
@@ -4950,14 +5082,15 @@ https://www.google.com | Google
               </div>
               <label for="webdavKeepCount" class="col-sm-2 control-label">${chrome.i18n.getMessage("webdavKeepCount")}:</label>
               <div class="col-sm-5">
-                <input type="number" min="0" class="form-control" id="webdavKeepCount" placeholder="10">
+                <input type="number" min="0" class="form-control" id="webdavKeepCount" placeholder="100">
               </div>
             </div>
-            <div style="margin-bottom:5px">
+            <div class="nj-dav-btns">
                 <button id="webdavTest" type="button" class="btn btn-default">${chrome.i18n.getMessage("webdavTest")}</button>
                 <button id="webdavUpload" type="button" class="btn btn-default">${chrome.i18n.getMessage("webdavUpload")}</button>
                 <button id="webdavRestore" type="button" class="btn btn-default">${chrome.i18n.getMessage("webdavRestore")}</button>
             </div>
+            <div id="webdavTestResult" style="margin-top:6px;font-size:14px;"></div>
         `;
         chrome.storage.local.get(null, function (storage) {
             if (storage.webdavUrl) {
@@ -4967,14 +5100,14 @@ https://www.google.com | Google
                 document.getElementById("webdavUser").value = storage.webdavUser
             }
             if (storage.webdavPass) {
-                document.getElementById("webdavPass").placeholder = `${chrome.i18n.getMessage("secretSavedPlaceholder")}`
+                document.getElementById("webdavPass").placeholder = "••••••••";
             }
             if (storage.webdavAutoBackup) {
                 document.getElementById("webdavAutoBackup").checked = true
             }
-            document.getElementById("webdavIntervalHours").value = storage.webdavIntervalHours || 12
+            document.getElementById("webdavIntervalHours").value = storage.webdavIntervalHours || 6
             document.getElementById("webdavKeepDays").value = storage.webdavKeepDays === undefined ? 30 : storage.webdavKeepDays
-            document.getElementById("webdavKeepCount").value = storage.webdavKeepCount === undefined ? 10 : storage.webdavKeepCount
+            document.getElementById("webdavKeepCount").value = storage.webdavKeepCount === undefined ? 100 : storage.webdavKeepCount
         });
 
         // 改完自动保存：地址/账号直接存；密码有新值才加密存（不 trim，首尾空格可能也是密码的一部分）
@@ -4994,13 +5127,13 @@ https://www.google.com | Google
             });
             njWebdavPassCache = v;
             this.value = "";
-            this.placeholder = chrome.i18n.getMessage("secretSavedPlaceholder");
+            this.placeholder = "••••••••";
         });
         document.getElementById('webdavAutoBackup').addEventListener('change', function () {
             chrome.storage.local.set({webdavAutoBackup: this.checked}, njAutoSavedToast);
         });
         document.getElementById('webdavIntervalHours').addEventListener('change', function () {
-            chrome.storage.local.set({webdavIntervalHours: Math.max(1, parseInt(this.value, 10) || 12)}, njAutoSavedToast);
+            chrome.storage.local.set({webdavIntervalHours: Math.max(1, parseInt(this.value, 10) || 6)}, njAutoSavedToast);
         });
         document.getElementById('webdavKeepDays').addEventListener('change', function () {
             chrome.storage.local.set({webdavKeepDays: Math.max(0, parseInt(this.value, 10) || 0)}, njAutoSavedToast);
@@ -5024,6 +5157,11 @@ https://www.google.com | Google
             }
             // 先列远端版本让用户选一份（带文件大小，可逐个删除）；列不出来或还没有版本时，回退到原来的固定文件名
             listWebdavVersionsDetailed(cfg, function (entries, err) {
+                if (err && String(err.message).indexOf("404") !== -1) {
+                    // 4.6.3 需求七：目录不存在就是还没有备份，提示即可、不记失败
+                    showAlert(`${chrome.i18n.getMessage("webdavTitle")}`, `${chrome.i18n.getMessage("webdavNoBackupYet")}`);
+                    return;
+                }
                 if (err || !entries.length) {
                     restoreBackupFromWebDav(null);
                     return;
@@ -5067,7 +5205,7 @@ https://www.google.com | Google
                                 if (time > expireTime) {
                                     pushToGithubGist();
                                 } else {
-                                    alert(storage.handleGithubGistStatus.type);
+                                    njAlert(storage.handleGithubGistStatus.type);
                                 }
                             }
                         } else {
@@ -5097,7 +5235,7 @@ https://www.google.com | Google
                                 if (time > expireTime) {
                                     pushToGiteeGist();
                                 } else {
-                                    alert(storage.handleGiteeGistStatus.type);
+                                    njAlert(storage.handleGiteeGistStatus.type);
                                 }
                             }
                         } else {
@@ -5112,29 +5250,28 @@ https://www.google.com | Google
         // 响应从github的gist拉取的动作
         document.getElementById('pullFromGithubGist').addEventListener('click', function () {
             njGistCheckTokenFirst("githubGistToken", "githubTokenNoSaved", function () {
-                showDoubleConfirmation(`${chrome.i18n.getMessage("pullFromGithubGist")}`, `${chrome.i18n.getMessage("gistPullOverwriteWarn")}`, function () {
-                    console.log("yes");
-                    chrome.storage.local.get(null, function (storage) {
-                        console.log(storage.handleGithubGistStatus);
-                        if (storage.handleGithubGistStatus) {
-                            console.log("handleGistStatus有值");
-                            if (storage.handleGithubGistStatus.type === "IDLE") {
+                // 4.6.3 需求十四：确认改到下载之后（防呆门里带内容构成），点按钮直接开拉；忙碌检查保留
+                console.log("yes");
+                chrome.storage.local.get(null, function (storage) {
+                    console.log(storage.handleGithubGistStatus);
+                    if (storage.handleGithubGistStatus) {
+                        console.log("handleGistStatus有值");
+                        if (storage.handleGithubGistStatus.type === "IDLE") {
+                            pullFromGithubGist();
+                        } else {
+                            let time = moment().format('YYYY-MM-DD HH:mm:ss');
+                            let expireTime = storage.handleGithubGistStatus.expireTime;
+                            console.log(expireTime)
+                            if (time > expireTime) {
                                 pullFromGithubGist();
                             } else {
-                                let time = moment().format('YYYY-MM-DD HH:mm:ss');
-                                let expireTime = storage.handleGithubGistStatus.expireTime;
-                                console.log(expireTime)
-                                if (time > expireTime) {
-                                    pullFromGithubGist();
-                                } else {
-                                    alert(storage.handleGithubGistStatus.type);
-                                }
+                                njAlert(storage.handleGithubGistStatus.type);
                             }
-                        } else {
-                            console.log("handleGistStatus没有值，第一次");
-                            pullFromGithubGist();
                         }
-                    });
+                    } else {
+                        console.log("handleGistStatus没有值，第一次");
+                        pullFromGithubGist();
+                    }
                 });
             });
         });
@@ -5142,36 +5279,90 @@ https://www.google.com | Google
         // 响应从gitee的gist拉取的动作
         document.getElementById('pullFromGiteeGist').addEventListener('click', function () {
             njGistCheckTokenFirst("giteeGistToken", "giteeTokenNoSaved", function () {
-                showDoubleConfirmation(`${chrome.i18n.getMessage("pullFromGiteeGist")}`, `${chrome.i18n.getMessage("gistPullOverwriteWarn")}`, function () {
-                    console.log("yes");
-                    chrome.storage.local.get(null, function (storage) {
-                        console.log(storage.handleGiteeGistStatus);
-                        if (storage.handleGiteeGistStatus) {
-                            console.log("handleGistStatus有值");
-                            if (storage.handleGiteeGistStatus.type === "IDLE") {
+                // 4.6.3 需求十四：确认改到下载之后（防呆门里带内容构成），点按钮直接开拉；忙碌检查保留
+                console.log("yes");
+                chrome.storage.local.get(null, function (storage) {
+                    console.log(storage.handleGiteeGistStatus);
+                    if (storage.handleGiteeGistStatus) {
+                        console.log("handleGistStatus有值");
+                        if (storage.handleGiteeGistStatus.type === "IDLE") {
+                            pullFromGiteeGist();
+                        } else {
+                            let time = moment().format('YYYY-MM-DD HH:mm:ss');
+                            let expireTime = storage.handleGiteeGistStatus.expireTime;
+                            console.log(expireTime)
+                            if (time > expireTime) {
                                 pullFromGiteeGist();
                             } else {
-                                let time = moment().format('YYYY-MM-DD HH:mm:ss');
-                                let expireTime = storage.handleGiteeGistStatus.expireTime;
-                                console.log(expireTime)
-                                if (time > expireTime) {
-                                    pullFromGiteeGist();
-                                } else {
-                                    alert(storage.handleGiteeGistStatus.type);
-                                }
+                                njAlert(storage.handleGiteeGistStatus.type);
                             }
-                        } else {
-                            console.log("handleGistStatus没有值，第一次");
-                            pullFromGiteeGist();
                         }
-                    });
+                    } else {
+                        console.log("handleGistStatus没有值，第一次");
+                        pullFromGiteeGist();
+                    }
                 });
             });
         });
     }
 
+    // 4.6.3.1 真机补修：弹框一个接一个开时，前一个的变暗遮罩可能残留在页面上把画面卡死。
+    // 每次弹框关透后自检：要是已经没有任何弹框开着，就把残留的遮罩和 body 上的 modal-open 一并清掉。
+    function njCleanupOrphanBackdrop() {
+        if (document.querySelectorAll(".modal.in, .modal.show").length === 0) {
+            document.querySelectorAll(".modal-backdrop").forEach(function (el) { el.remove(); });
+            document.body.classList.remove("modal-open");
+            document.body.style.paddingRight = "";
+        }
+    }
+
     // 统一的弹窗提示
-    function showAlert(title, message) {
+    // 4.6.1：扩展内统一提示框，代替浏览器自带 alert（风格与插件其它弹窗一致）；点「关闭」后可接后续动作（如刷新）
+    function njAlert(message, onOk, autoMs) {
+        let modalHtml = `
+        <div class="modal fade" id="njMsgModal" tabindex="-1" role="dialog" aria-hidden="true">
+          <div class="modal-dialog" role="document">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title">NJ-Tab</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                  <span aria-hidden="true">&times;</span>
+                </button>
+              </div>
+              <div class="modal-body">${escapeHtml(String(message)).replace(/\n/g, "<br>")}</div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="njMsgOkBtn">${chrome.i18n.getMessage("njCancel") === "取消" ? "关闭" : "Close"}</button>
+              </div>
+            </div>
+          </div>
+        </div>`;
+        // 4.6.3 需求一：查找限定在容器内、关掉即销毁
+        let modalContainer = document.createElement('div');
+        modalContainer.innerHTML = modalHtml;
+        document.body.appendChild(modalContainer);
+        let $m = $(modalContainer);
+        let $modal = $m.find('.modal');
+        let njOkClicked = false;
+        $modal.on('hidden.bs.modal', function () {
+            modalContainer.remove();
+            njCleanupOrphanBackdrop();
+            if (njOkClicked && onOk) { onOk(); }
+        });
+        $modal.modal('show');
+        $m.find('#njMsgOkBtn').on('click', function () {
+            njOkClicked = true;
+            $modal.modal('hide');
+        });
+        // 4.6.5：成功提示可要求 6 秒自动消失（autoMs），不用等手点、也不刷新页面；触发前先确认弹框还在页面上
+        if (autoMs) { setTimeout(function () { if (document.body.contains($modal[0])) { $modal.modal('hide'); } }, autoMs); }
+    }
+
+    // 4.6.1：扩展内统一确认框，代替浏览器自带 confirm（复用已有的 showConfirmation 弹窗）
+    function njConfirm(message, onOk) {
+        showConfirmation(`${chrome.i18n.getMessage("confirm")}`, escapeHtml(String(message)).replace(/\n/g, "<br>"), onOk);
+    }
+
+    function showAlert(title, message, autoMs) {
         let modalHtml = `
         <div class="modal fade" id="alertModal" tabindex="-1" role="dialog" aria-labelledby="alertModalLabel" aria-hidden="true">
           <div class="modal-dialog" role="document">
@@ -5192,16 +5383,18 @@ https://www.google.com | Google
           </div>
         </div>
       `;
-
+        // 4.6.3 需求一：查找限定在容器内、关掉即销毁
         let modalContainer = document.createElement('div');
         modalContainer.innerHTML = modalHtml;
         document.body.appendChild(modalContainer);
-
-        $('#alertModal').modal('show');
+        let $modal = $(modalContainer).find('.modal');
+        $modal.on('hidden.bs.modal', function () { modalContainer.remove(); njCleanupOrphanBackdrop(); });
+        $modal.modal('show');
+        if (autoMs) { setTimeout(function () { if (document.body.contains($modal[0])) { $modal.modal('hide'); } }, autoMs); }
     }
 
     // 统一的2次确认弹窗
-    function showConfirmation(title, message, onConfirm) {
+    function showConfirmation(title, message, onConfirm, onCancel) {
         let modalHtml = `
         <div class="modal fade" id="confirmationModal" tabindex="-1" role="dialog" aria-labelledby="confirmationModalLabel" aria-hidden="true">
           <div class="modal-dialog" role="document">
@@ -5223,21 +5416,51 @@ https://www.google.com | Google
           </div>
         </div>
             `;
-
+        // 4.6.3 需求一：查找限定在容器内、关掉即销毁（原先同名弹框残留是导入/恢复卡死的根源）
         let modalContainer = document.createElement('div');
         modalContainer.innerHTML = modalHtml;
         document.body.appendChild(modalContainer);
-
-        $('#confirmationModal').modal('show');
-
-        $('#confirmButton').on('click', function () {
-            $('#confirmationModal').modal('hide');
-            onConfirm();
+        let $m = $(modalContainer);
+        let $modal = $m.find('.modal');
+        let njConfirmed = false;
+        $modal.on('hidden.bs.modal', function () {
+            modalContainer.remove();
+            njCleanupOrphanBackdrop();
+            if (njConfirmed) { onConfirm(); } else if (onCancel) { onCancel(); }
+        });
+        $modal.modal('show');
+        $m.find('#confirmButton').on('click', function () {
+            njConfirmed = true;
+            $modal.modal('hide');
         });
     }
 
     // 覆盖类操作的 2 次确认弹窗：第 1 次普通确认讲清后果；第 2 次必须输入单个字母 Y，确认按钮才可用
-    function showDoubleConfirmation(title, message, onConfirm) {
+    // 输 Y 输入框的统一绑定（南极要求）：只允许输入 y（不分大小写），其他任何字符都输不进去；
+    // 顺带兼容中文输入法打出的全角ｙ——一律规范成大写 Y，输对后「确认执行」才可点。
+    // （4.6.3.1 实测出现过输了 y 按钮仍不生效：旧校验要求值精确等于半角 Y，全角或混入其他字符就永远对不上。）
+    function njBindYInput($m) {
+        let $input = $m.find('#njConfirmYInput');
+        let $btn = $m.find('#njConfirmExecBtn');
+        $input.on('keydown', function (e) {
+            if (e.key && e.key.length === 1 && !/^[yYｙＹ]$/.test(e.key) && !e.ctrlKey && !e.metaKey) {
+                e.preventDefault();
+                return;
+            }
+            if (e.key === 'Enter' && !$btn.prop('disabled')) {
+                $btn.click();
+            }
+        });
+        $input.on('input', function () {
+            let ok = /[yYｙＹ]/.test($(this).val());
+            $(this).val(ok ? 'Y' : '');
+            $btn.prop('disabled', !ok);
+        });
+    }
+
+    function showDoubleConfirmation(title, message, onConfirm, onCancel, footerNote) {
+        // 「2 次确认」机制（南极口径）：一个框同屏完成——上面讲清后果，下面直接是输 Y 的输入框，
+        // 输对 Y 后「确认执行」才可点；没有中间点「继续」翻页那一步
         let modalHtml = `
         <div class="modal fade" id="confirmationModal" tabindex="-1" role="dialog" aria-labelledby="confirmationModalLabel" aria-hidden="true">
           <div class="modal-dialog" role="document">
@@ -5249,50 +5472,38 @@ https://www.google.com | Google
                 </button>
               </div>
               <div class="modal-body">
-                <div id="njConfirmStep1">${message}</div>
-                <div id="njConfirmStep2" style="display:none">
-                  <p>${chrome.i18n.getMessage("njTypeYHint")}</p>
-                  <input type="text" class="form-control" id="njConfirmYInput" maxlength="1" autocomplete="off" placeholder="Y">
-                </div>
+                <div>${String(message).split(/<br\s*\/?>/).filter(function (x) { return x.trim() !== ""; }).map(function (x) { return '<p style="margin:0 0 14px;">' + x + '</p>'; }).join("")}</div>
+                <input type="text" class="form-control" id="njConfirmYInput" maxlength="1" autocomplete="off" placeholder="${chrome.i18n.getMessage("njTypeYHint")}">
               </div>
-              <div class="modal-footer">
+              <div class="modal-footer"${footerNote ? ' style="display:flex;justify-content:space-between;align-items:center;"' : ''}>
+                ${footerNote ? `<span style="font-size:12px;color:#888;max-width:62%;text-align:left;line-height:1.55;">${footerNote}</span><span>` : ''}
                 <button type="button" class="btn btn-secondary" data-dismiss="modal">${chrome.i18n.getMessage("njCancel")}</button>
-                <button type="button" class="btn btn-primary" id="njConfirmNextBtn">${chrome.i18n.getMessage("njContinue")}</button>
-                <button type="button" class="btn btn-danger" id="njConfirmExecBtn" style="display:none" disabled>${chrome.i18n.getMessage("njExecute")}</button>
+                <button type="button" class="btn btn-danger" id="njConfirmExecBtn" disabled>${chrome.i18n.getMessage("njExecute")}</button>
+                ${footerNote ? '</span>' : ''}
               </div>
             </div>
           </div>
         </div>
             `;
-
+        // 4.6.3 需求一：查找限定在容器内、关掉即销毁；下一步动作等关透后再执行（4.6.3.1 防遮罩卡死）
         let modalContainer = document.createElement('div');
         modalContainer.innerHTML = modalHtml;
         document.body.appendChild(modalContainer);
-
-        $('#confirmationModal').modal('show');
-
-        $('#njConfirmNextBtn').on('click', function () {
-            $('#njConfirmStep1').hide();
-            $('#njConfirmNextBtn').hide();
-            $('#njConfirmStep2').show();
-            $('#njConfirmExecBtn').show();
-            $('#njConfirmYInput').focus();
+        let $m = $(modalContainer);
+        let $modal = $m.find('.modal');
+        let njConfirmed = false;
+        $modal.on('hidden.bs.modal', function () {
+            modalContainer.remove();
+            njCleanupOrphanBackdrop();
+            if (njConfirmed) { onConfirm(); } else if (onCancel) { onCancel(); }
         });
-
-        $('#njConfirmYInput').on('input', function () {
-            let ok = $(this).val().trim().toUpperCase() === 'Y';
-            $('#njConfirmExecBtn').prop('disabled', !ok);
-        });
-
-        $('#njConfirmYInput').on('keydown', function (e) {
-            if (e.key === 'Enter' && !$('#njConfirmExecBtn').prop('disabled')) {
-                $('#njConfirmExecBtn').click();
-            }
-        });
-
-        $('#njConfirmExecBtn').on('click', function () {
-            $('#confirmationModal').modal('hide');
-            onConfirm();
+        // 4.6.6 需求二：弹框「已完全显示」后再聚焦（赶在 show 之前绑定、one 只触发一次；第三方审核建议）——界面库淡入结束时会把焦点抢到弹框本体，+300ms 的老写法抢不过它
+        $modal.one('shown.bs.modal', function () { $m.find('#njConfirmYInput').focus(); });
+        $modal.modal('show');
+        njBindYInput($m);
+        $m.find('#njConfirmExecBtn').on('click', function () {
+            njConfirmed = true;
+            $modal.modal('hide');
         });
     }
 
@@ -5316,16 +5527,16 @@ https://www.google.com | Google
         $("#webdavPage").addClass("hide")
         $("#importOneTab").addClass("hide")
         $("#importDefault").addClass("hide")
-        $("#exportDefault").addClass("hide")
+        $("#exportDefault").addClass("hide"); $("#njExportFiles").addClass("hide"); $("#njImportBackup").addClass("hide")
         $("#logs").addClass("hide")
         $("#tabGroupsBak").removeClass("hide")
         njLoadData(function (njData) {
-        chrome.storage.local.get(["options", "dragType", "restoreDiscarded", "discardedThreshold", "delRetentionDays"], function (storage) {
+        chrome.storage.local.get(["options", "dragType", "delRetentionDays"], function (storage) {
             let del_bridge = njData.delTabGroups;
             let i;
             let total = 0;
             for (i = 0; i < del_bridge.length; i += 1) {
-                total += del_bridge[i].tabs.length;
+                total += (del_bridge[i].tabs || []).length;
             }
             let totalsEl = document.getElementById('totals');
             njUpdateTotals(totalsEl, "deleted", i, total);
@@ -5336,11 +5547,6 @@ https://www.google.com | Google
                 opts = storage.options || {
                     deleteTabOnOpen: 'no'
                 };
-            // 恢复时休眠打开的开关（阶段D，与主列表共用同一个设置，默认 false = 保持原行为）
-            let restoreDiscarded = storage.restoreDiscarded === true;
-            // 4.4 需求五：休眠阈值 N（同一个数，默认 10）；只在休眠开关开时才参与判断
-            let discardedN = parseInt(storage.discardedThreshold, 10);
-            if (!(discardedN >= 1)) { discardedN = 10; }
 
             // 回收站保留天数设置（A2补完）：storage 里没存过或存了非法值时 normalize 按默认30天处理
             let delRetentionDays = normalizeDelRetentionDays(storage.delRetentionDays);
@@ -5623,7 +5829,7 @@ https://www.google.com | Google
                     }, groupTitle), m('span.group-date', njDelGroupTimeText(group)), ' ', delRemainingNode(group.deletedAt()), ' ', m('span.restore-all', {
                         onclick: function (e) {
                             let ci = currentGroupIndex((e && e.currentTarget) || this, i);
-                            // 4.5 需求一：打开整组走 njOpenWholeGroup——点击时现读休眠设置、汇总休眠结果写日志
+                            // 打开整组走 njOpenWholeGroup（普通打开，休眠打开已取消）
                             njOpenWholeGroup(group, isLock, groupTitle, function () {
                                 tabs.vm.rmGroup(ci);
                             });
