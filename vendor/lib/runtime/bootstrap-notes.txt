@@ -1,5 +1,0 @@
-Bootstrap notes (draft)
-
-- Runtime modules are loaded in lexical order.
-- Defaults live in env.default.json; local overrides are not committed.
-- Keep this folder self-contained: no imports from the extension core.
