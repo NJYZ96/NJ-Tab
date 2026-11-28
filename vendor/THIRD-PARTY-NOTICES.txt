@@ -1,9 +1,0 @@
-Third-party notices
-===================
-
-This directory vendors small runtime helpers used by the project.
-All bundled pieces are redistributed under their respective licenses.
-See each file header for details.
-
-- shared-utils.js  : internal utility helpers, MIT
-- config.schema.json : configuration schema draft, internal use
